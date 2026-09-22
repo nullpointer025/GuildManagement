@@ -25,6 +25,7 @@ export interface RaidSummary {
 
 export interface RaidDetail extends RaidSummary {
   parties: (Player | null)[][];
+  partyNames: (string | null)[];
 }
 
 export interface ImportSummary {

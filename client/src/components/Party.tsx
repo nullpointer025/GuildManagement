@@ -1,17 +1,32 @@
+import { useEffect, useState } from "react";
 import type { Player } from "../types";
 import { PartySlot } from "./PartySlot";
 
 interface PartyProps {
   partyIndex: number;
+  name: string | null;
   members: (Player | null)[];
   onRemove: (slotIndex: number) => void;
+  onRename: (name: string) => void;
 }
 
-export function Party({ partyIndex, members, onRemove }: PartyProps) {
+export function Party({ partyIndex, name, members, onRemove, onRename }: PartyProps) {
+  const [draft, setDraft] = useState(name ?? "");
+
+  useEffect(() => {
+    setDraft(name ?? "");
+  }, [name]);
+
   const filled = members.filter(Boolean).length;
   const totalGs = members.reduce((sum, m) => sum + (m?.gear_score ?? 0), 0);
   const avgGs = filled > 0 ? Math.round(totalGs / filled) : 0;
   const full = filled === members.length;
+
+  function commit() {
+    const trimmed = draft.trim();
+    if (trimmed !== (name ?? "")) onRename(trimmed);
+    setDraft(trimmed);
+  }
 
   return (
     <div
@@ -20,9 +35,20 @@ export function Party({ partyIndex, members, onRemove }: PartyProps) {
         full ? "border-gold/40" : "border-border",
       ].join(" ")}
     >
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-base font-semibold text-heading">Party {partyIndex + 1}</h3>
-        <span className="text-sm text-ink-dim">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="shrink-0 text-base font-semibold text-heading">{partyIndex + 1}</span>
+          <span className="shrink-0 text-base text-ink-dim">—</span>
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+            placeholder="Name this party…"
+            className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1 text-base font-semibold text-heading outline-none placeholder:font-normal placeholder:text-ink-dim/50 hover:border-border focus:border-gold focus:bg-panel-alt"
+          />
+        </div>
+        <span className="shrink-0 text-sm text-ink-dim">
           {filled}/{members.length}
           {avgGs > 0 && <span className="text-gold"> · avg {avgGs.toLocaleString()}</span>}
         </span>

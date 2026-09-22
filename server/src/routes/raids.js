@@ -6,13 +6,17 @@ export const raidsRouter = Router();
 raidsRouter.use(requireAuth);
 
 function createEmptySlots(raidId, partyCount) {
-  const insert = db.prepare(
+  const insertSlot = db.prepare(
     "INSERT INTO raid_slots (raid_id, party_index, slot_index, player_id) VALUES (?, ?, ?, NULL)"
+  );
+  const insertParty = db.prepare(
+    "INSERT INTO raid_parties (raid_id, party_index, name) VALUES (?, ?, NULL)"
   );
   const txn = transaction(() => {
     for (let p = 0; p < partyCount; p++) {
+      insertParty.run(raidId, p);
       for (let s = 0; s < 5; s++) {
-        insert.run(raidId, p, s);
+        insertSlot.run(raidId, p, s);
       }
     }
   });
@@ -63,7 +67,15 @@ function getRaidWithSlots(raidId) {
     }
   }
 
-  return { ...raid, parties };
+  const partyNames = Array(raid.party_count).fill(null);
+  const nameRows = db
+    .prepare("SELECT party_index, name FROM raid_parties WHERE raid_id = ?")
+    .all(raidId);
+  for (const row of nameRows) {
+    if (row.party_index < partyNames.length) partyNames[row.party_index] = row.name;
+  }
+
+  return { ...raid, parties, partyNames };
 }
 
 raidsRouter.get("/", (req, res) => {
@@ -123,17 +135,28 @@ raidsRouter.patch("/:id", (req, res) => {
       return res.status(400).json({ error: "Party count must be between 1 and 20" });
     }
     if (count > existing.party_count) {
-      const insert = db.prepare(
+      const insertSlot = db.prepare(
         "INSERT INTO raid_slots (raid_id, party_index, slot_index, player_id) VALUES (?, ?, ?, NULL)"
+      );
+      const insertParty = db.prepare(
+        "INSERT INTO raid_parties (raid_id, party_index, name) VALUES (?, ?, NULL)"
       );
       const txn = transaction(() => {
         for (let p = existing.party_count; p < count; p++) {
-          for (let s = 0; s < 5; s++) insert.run(id, p, s);
+          insertParty.run(id, p);
+          for (let s = 0; s < 5; s++) insertSlot.run(id, p, s);
         }
       });
       txn();
     } else if (count < existing.party_count) {
-      db.prepare("DELETE FROM raid_slots WHERE raid_id = ? AND party_index >= ?").run(id, count);
+      const txn = transaction(() => {
+        db.prepare("DELETE FROM raid_slots WHERE raid_id = ? AND party_index >= ?").run(id, count);
+        db.prepare("DELETE FROM raid_parties WHERE raid_id = ? AND party_index >= ?").run(
+          id,
+          count
+        );
+      });
+      txn();
     }
     db.prepare("UPDATE raids SET party_count = ?, updated_at = datetime('now') WHERE id = ?").run(
       count,
@@ -182,6 +205,27 @@ raidsRouter.put("/:id/slots", (req, res) => {
     db.prepare("UPDATE raids SET updated_at = datetime('now') WHERE id = ?").run(raidId);
   });
   txn();
+
+  res.json({ raid: getRaidWithSlots(raidId) });
+});
+
+// Set (or clear, with an empty/omitted name) a party's custom display name.
+raidsRouter.patch("/:id/parties/:partyIndex", (req, res) => {
+  const raidId = Number(req.params.id);
+  const partyIndex = Number(req.params.partyIndex);
+  const raid = db.prepare("SELECT * FROM raids WHERE id = ?").get(raidId);
+  if (!raid) return res.status(404).json({ error: "Raid not found" });
+  if (!Number.isInteger(partyIndex) || partyIndex < 0 || partyIndex >= raid.party_count) {
+    return res.status(400).json({ error: "Invalid party index" });
+  }
+
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() || null : null;
+
+  db.prepare(
+    `INSERT INTO raid_parties (raid_id, party_index, name) VALUES (?, ?, ?)
+     ON CONFLICT(raid_id, party_index) DO UPDATE SET name = excluded.name`
+  ).run(raidId, partyIndex, name);
+  db.prepare("UPDATE raids SET updated_at = datetime('now') WHERE id = ?").run(raidId);
 
   res.json({ raid: getRaidWithSlots(raidId) });
 });

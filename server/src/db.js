@@ -78,4 +78,14 @@ CREATE TABLE IF NOT EXISTS raid_slots (
 );
 
 CREATE INDEX IF NOT EXISTS idx_raid_slots_raid ON raid_slots(raid_id);
+
+CREATE TABLE IF NOT EXISTS raid_parties (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  raid_id INTEGER NOT NULL REFERENCES raids(id) ON DELETE CASCADE,
+  party_index INTEGER NOT NULL,
+  name TEXT,
+  UNIQUE(raid_id, party_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_raid_parties_raid ON raid_parties(raid_id);
 `);

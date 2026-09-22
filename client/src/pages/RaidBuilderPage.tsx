@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   DndContext,
@@ -14,6 +14,7 @@ import type { Player, RaidDetail } from "../types";
 import type { DragOrigin } from "../components/DraggablePlayer";
 import { PoolPanel } from "../components/PoolPanel";
 import { Party } from "../components/Party";
+import { ExportParty } from "../components/ExportParty";
 import { PlayerCard } from "../components/PlayerCard";
 
 type SortKey = "gear_score" | "level" | "ign" | "class";
@@ -31,6 +32,9 @@ export function RaidBuilderPage() {
   const [classFilter, setClassFilter] = useState<string>("all");
   const [activeDrag, setActiveDrag] = useState<Player | null>(null);
   const [nameDraft, setNameDraft] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportUpTo, setExportUpTo] = useState(8);
+  const exportRef = useRef<HTMLDivElement>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
@@ -52,6 +56,13 @@ export function RaidBuilderPage() {
       cancelled = true;
     };
   }, [raidId]);
+
+  // Keep the export range in sync with the raid's actual party count, without
+  // clobbering a smaller value the officer deliberately picked.
+  useEffect(() => {
+    if (!raid) return;
+    setExportUpTo((prev) => Math.min(prev, raid.party_count) || raid.party_count);
+  }, [raid?.party_count]);
 
   const classOptions = useMemo(() => {
     const classes = new Set(
@@ -145,11 +156,56 @@ export function RaidBuilderPage() {
     setRaid(updated);
   }
 
+  async function handleRenameParty(partyIndex: number, name: string) {
+    const { raid: updated } = await api.renameParty(raidId, partyIndex, name);
+    setRaid(updated);
+  }
+
   async function handleDeleteRaid() {
     if (!confirm("Delete this raid team? This cannot be undone.")) return;
     await api.deleteRaid(raidId);
     navigate("/raids");
   }
+
+  function handleExportImage() {
+    setExporting(true);
+  }
+
+  // html-to-image needs the source node genuinely painted on screen (off-screen/hidden
+  // nodes capture blank), so the snapshot mounts inside a full-screen overlay for the
+  // brief moment it takes to render + capture it.
+  useEffect(() => {
+    if (!exporting || !raid) return;
+    let cancelled = false;
+    (async () => {
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      if (cancelled || !exportRef.current) {
+        setExporting(false);
+        return;
+      }
+      try {
+        const { toPng } = await import("html-to-image");
+        const dataUrl = await toPng(exportRef.current, {
+          backgroundColor: "#0b0e14",
+          pixelRatio: 2,
+        });
+        const link = document.createElement("a");
+        const safeName = raid.name.trim().replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "raid-team";
+        link.download = `${safeName}.png`;
+        link.href = dataUrl;
+        link.click();
+      } catch (err) {
+        console.error(err);
+        alert("Couldn't export the image. Please try again.");
+      } finally {
+        if (!cancelled) setExporting(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exporting]);
 
   if (loading || !raid) {
     return <p className="text-base text-ink-dim">Loading raid…</p>;
@@ -157,6 +213,7 @@ export function RaidBuilderPage() {
 
   const totalAssigned = raid.parties.flat().filter(Boolean).length;
   const totalSlots = raid.party_count * 5;
+  const exportCols = Math.min(4, exportUpTo || 1);
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
@@ -198,6 +255,27 @@ export function RaidBuilderPage() {
                 +
               </button>
             </div>
+            <div className="flex items-center gap-1 rounded-lg border border-border p-1">
+              <span className="pl-2 text-sm text-ink-dim">Export up to</span>
+              <input
+                type="number"
+                min={1}
+                max={raid.party_count}
+                value={exportUpTo}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  setExportUpTo(Math.max(1, Math.min(raid.party_count, Number.isFinite(n) ? n : 1)));
+                }}
+                className="w-14 rounded-md border border-transparent bg-panel-alt px-2 py-1 text-center text-sm text-ink outline-none focus:border-gold"
+              />
+            </div>
+            <button
+              onClick={handleExportImage}
+              disabled={exporting}
+              className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {exporting ? "Exporting…" : "Export as image"}
+            </button>
             <button
               onClick={handleDeleteRaid}
               className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-danger hover:text-danger"
@@ -250,8 +328,10 @@ export function RaidBuilderPage() {
               <Party
                 key={partyIndex}
                 partyIndex={partyIndex}
+                name={raid.partyNames[partyIndex] ?? null}
                 members={members}
                 onRemove={(slotIndex) => setSlot(partyIndex, slotIndex, null)}
+                onRename={(name) => handleRenameParty(partyIndex, name)}
               />
             ))}
           </div>
@@ -259,6 +339,44 @@ export function RaidBuilderPage() {
       </div>
 
       <DragOverlay>{activeDrag && <PlayerCard player={activeDrag} overlay />}</DragOverlay>
+
+      {/* Static snapshot captured for "Export as image", mounted only while exporting.
+          html-to-image needs the source node genuinely painted on screen (an off-screen or
+          hidden node captures blank), so this is a real full-screen overlay, not a trick. */}
+      {exporting && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center gap-4 overflow-auto bg-bg/98 p-8">
+          <p className="text-sm text-ink-dim">Generating image…</p>
+          <div ref={exportRef} className="rounded-2xl bg-bg p-2">
+            <div className="mb-4 px-1">
+              <h2 className="text-xl font-bold text-heading">{raid.name}</h2>
+              <p className="text-sm text-ink-dim">
+                {raid.parties
+                  .slice(0, exportUpTo)
+                  .flat()
+                  .filter(Boolean).length}
+                /{exportUpTo * 5} players assigned
+                {exportUpTo < raid.party_count && ` · Parties 1–${exportUpTo}`}
+              </p>
+            </div>
+            <div
+              className="grid gap-5"
+              style={{
+                width: exportCols * 285 + Math.max(0, exportCols - 1) * 20,
+                gridTemplateColumns: `repeat(${exportCols}, 1fr)`,
+              }}
+            >
+              {raid.parties.slice(0, exportUpTo).map((members, partyIndex) => (
+                <ExportParty
+                  key={partyIndex}
+                  partyIndex={partyIndex}
+                  name={raid.partyNames[partyIndex] ?? null}
+                  members={members}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </DndContext>
   );
 }
