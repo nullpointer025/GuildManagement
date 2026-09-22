@@ -185,7 +185,7 @@ export function RaidBuilderPage() {
     if (!raid) return;
     const current = raid.boards[activeBoard].parties.length;
     const next = current + delta;
-    if (next < 1 || next > 20) return;
+    if (next < 1 || next > 50) return;
     const { raid: updated } = await api.updatePartyCount(raidId, activeBoard, next);
     setRaid(updated);
   }

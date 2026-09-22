@@ -113,8 +113,8 @@ raidsRouter.post("/", (req, res) => {
   if (!trimmedName) return res.status(400).json({ error: "Raid name is required" });
 
   const count = Number(partyCount) || 8;
-  if (count < 1 || count > 20) {
-    return res.status(400).json({ error: "Party count must be between 1 and 20" });
+  if (count < 1 || count > 50) {
+    return res.status(400).json({ error: "Party count must be between 1 and 50" });
   }
 
   const info = db.prepare("INSERT INTO raids (name) VALUES (?)").run(trimmedName);
@@ -159,8 +159,8 @@ raidsRouter.patch("/:id/party-count", (req, res) => {
 
   const { board, partyCount } = req.body ?? {};
   const count = Number(partyCount);
-  if (!isValidBoard(board) || !Number.isInteger(count) || count < 1 || count > 20) {
-    return res.status(400).json({ error: "Invalid board or party count (must be 1-20)" });
+  if (!isValidBoard(board) || !Number.isInteger(count) || count < 1 || count > 50) {
+    return res.status(400).json({ error: "Invalid board or party count (must be 1-50)" });
   }
 
   const current = boardPartyCount(id, board);

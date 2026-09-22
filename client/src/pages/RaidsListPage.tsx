@@ -79,7 +79,7 @@ export function RaidsListPage() {
           <input
             type="number"
             min={1}
-            max={20}
+            max={50}
             value={partyCount}
             onChange={(e) => setPartyCount(Number(e.target.value))}
             className={`${inputClass} w-32`}
