@@ -33,13 +33,6 @@ export function transaction(fn) {
 }
 
 db.exec(`
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  username TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
 CREATE TABLE IF NOT EXISTS players (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ign TEXT UNIQUE NOT NULL,
@@ -62,14 +55,14 @@ CREATE TABLE IF NOT EXISTS players (
 CREATE TABLE IF NOT EXISTS raids (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
-  party_count INTEGER NOT NULL DEFAULT 8,
-  created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- "board" splits each raid into two independent party grids ('main' and 'sub')
--- that share the same raid/party_count shell but hold separate assignments.
+-- that share the same roster pool but hold separate, independently-sized rosters.
+-- A board's party count is however many party_index values exist for it here —
+-- there is no separate stored count to keep in sync.
 CREATE TABLE IF NOT EXISTS raid_slots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   raid_id INTEGER NOT NULL REFERENCES raids(id) ON DELETE CASCADE,
@@ -94,10 +87,10 @@ CREATE TABLE IF NOT EXISTS raid_parties (
 CREATE INDEX IF NOT EXISTS idx_raid_parties_raid ON raid_parties(raid_id);
 `);
 
-// One-time migration for databases created before the "board" column existed:
-// rebuild raid_slots/raid_parties with the new unique constraints (SQLite can't
-// alter a UNIQUE constraint in place), tag existing rows as the 'main' board,
-// and give every existing raid an empty 'sub' board to match.
+// One-time migration for databases created before boards existed at all: rebuild
+// raid_slots/raid_parties with the new unique constraints (SQLite can't alter a
+// UNIQUE constraint in place), tag existing rows as the 'main' board, and give
+// every existing raid an empty 'sub' board sized to match main.
 function migrateAddBoardColumn() {
   const columns = db.prepare("PRAGMA table_info(raid_slots)").all();
   if (columns.some((c) => c.name === "board")) return;
@@ -151,4 +144,32 @@ function migrateAddBoardColumn() {
   txn();
 }
 
+// One-time migration dropping per-officer accounts in favor of a single shared
+// invite-code gate, and the now-meaningless shared party_count column (each
+// board tracks its own size via which party_index rows exist for it).
+function migrateRemoveAccountsAndSharedPartyCount() {
+  const columns = db.prepare("PRAGMA table_info(raids)").all();
+  const hasCreatedBy = columns.some((c) => c.name === "created_by");
+  const hasPartyCount = columns.some((c) => c.name === "party_count");
+  if (!hasCreatedBy && !hasPartyCount) return;
+
+  const txn = transaction(() => {
+    db.exec(`
+      ALTER TABLE raids RENAME TO raids_old;
+      CREATE TABLE raids (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO raids (id, name, created_at, updated_at)
+        SELECT id, name, created_at, updated_at FROM raids_old;
+      DROP TABLE raids_old;
+      DROP TABLE IF EXISTS users;
+    `);
+  });
+  txn();
+}
+
 migrateAddBoardColumn();
+migrateRemoveAccountsAndSharedPartyCount();

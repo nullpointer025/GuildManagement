@@ -3,8 +3,8 @@
 A small web app for running a game guild: import the roster CSV export, keep a searchable member list, and build raid teams by dragging player cards into 5-player parties.
 
 - **Roster** — drag & drop (or browse) a CSV export to import members. Re-importing later updates existing members by IGN, adds new ones, and flags anyone missing from the latest export instead of deleting them.
-- **Raid Teams** — create named, saved raids (e.g. "Saturday WoE"), pick how many 5-player parties they have (defaults to 8 = 40 players), and drag roster cards into party slots. Dragging onto an occupied slot swaps the two players; dragging back onto the roster pool benches a player. Everything is saved to the server as you go, so all officers see the same board.
-- **Accounts** — officers create their own login, gated by a shared invite code you set yourself.
+- **Raid Teams** — create named, saved raids (e.g. "Saturday WoE"), each with two independent boards, **Main** and **Sub**, sized separately and sharing one roster pool (a player assigned on one board is unavailable on the other). Drag roster cards into party slots; dragging onto an occupied slot swaps the two players, dragging back onto the roster pool benches a player. Everything is saved to the server as you go and polled live every few seconds, so officers editing the same raid at the same time see each other's changes without refreshing.
+- **Access** — no individual accounts. Everyone who wants in enters one shared guild invite code you set yourself; it's remembered for 30 days.
 
 ## Stack
 
@@ -22,7 +22,7 @@ npm install
 Copy `server/.env.example` to `server/.env` and fill in:
 
 - `JWT_SECRET` — long random string (`node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`)
-- `GUILD_INVITE_CODE` — a code you share with officers so they can register
+- `GUILD_INVITE_CODE` — the single shared code officers enter to get in
 
 Then, in two terminals:
 
@@ -31,7 +31,7 @@ npm run dev:server   # http://localhost:4000
 npm run dev:client   # http://localhost:5173 (proxies /api to the server)
 ```
 
-Open http://localhost:5173, register the first officer account with your invite code, and import a CSV from the Roster page.
+Open http://localhost:5173, enter your invite code, and import a CSV from the Roster page.
 
 ## CSV format
 
@@ -56,7 +56,7 @@ This app is **not** a fit for Vercel: Vercel's hosting is serverless (stateless 
 4. **Set environment variables** on the service (Settings → Variables):
    - `NODE_ENV=production`
    - `JWT_SECRET` — long random string (`node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`)
-   - `GUILD_INVITE_CODE` — the code you'll share with officers
+   - `GUILD_INVITE_CODE` — the single shared code you'll give your officers
    - `DATA_DIR=/data` (from step 3)
    - Leave `PORT` unset — Railway injects it automatically and the server already reads `process.env.PORT`.
 5. **Point guildmanager.site at Railway:** in the Railway service → Settings → Networking → Custom Domain, add `guildmanager.site` (and/or `www.guildmanager.site`). Railway gives you a CNAME target. Go to your domain registrar's DNS settings and add a CNAME record for that host pointing at the value Railway gives you (for the bare root domain some registrars require an ALIAS/ANAME record instead of CNAME — Railway's dashboard tells you which to use). Railway provisions the HTTPS certificate automatically once DNS resolves.
@@ -64,4 +64,4 @@ This app is **not** a fit for Vercel: Vercel's hosting is serverless (stateless 
 
 Render or Fly.io work the same way if you'd rather use one of those — same idea: a persistent volume for `/data`, `DATA_DIR` pointed at it, and the same environment variables.
 
-Once it's behind HTTPS, cookies are marked `secure` automatically in production, so login only works over `https://`.
+Once it's behind HTTPS, cookies are marked `secure` automatically in production, so entering the invite code only works over `https://`.

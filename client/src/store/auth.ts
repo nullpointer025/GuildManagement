@@ -1,31 +1,30 @@
 import { create } from "zustand";
 import { api } from "../api/client";
-import type { User } from "../types";
 
 interface AuthState {
-  user: User | null;
+  unlocked: boolean;
   checked: boolean;
   init: () => Promise<void>;
-  setUser: (user: User | null) => void;
+  setUnlocked: (unlocked: boolean) => void;
   logout: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
-  user: null,
+  unlocked: false,
   checked: false,
   async init() {
     try {
-      const { user } = await api.me();
-      set({ user, checked: true });
+      await api.me();
+      set({ unlocked: true, checked: true });
     } catch {
-      set({ user: null, checked: true });
+      set({ unlocked: false, checked: true });
     }
   },
-  setUser(user) {
-    set({ user, checked: true });
+  setUnlocked(unlocked) {
+    set({ unlocked, checked: true });
   },
   async logout() {
     await api.logout();
-    set({ user: null });
+    set({ unlocked: false });
   },
 }));

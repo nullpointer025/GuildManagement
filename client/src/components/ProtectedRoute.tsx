@@ -3,13 +3,13 @@ import { useAuthStore } from "../store/auth";
 import { Navbar } from "./Navbar";
 
 export function ProtectedRoute() {
-  const user = useAuthStore((s) => s.user);
+  const unlocked = useAuthStore((s) => s.unlocked);
   const checked = useAuthStore((s) => s.checked);
 
   if (!checked) {
     return <div className="flex h-screen items-center justify-center text-ink-dim">Loading…</div>;
   }
-  if (!user) return <Navigate to="/login" replace />;
+  if (!unlocked) return <Navigate to="/enter" replace />;
 
   return (
     <div className="min-h-screen">

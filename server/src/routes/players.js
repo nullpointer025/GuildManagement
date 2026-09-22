@@ -1,11 +1,11 @@
 import { Router } from "express";
 import multer from "multer";
 import { db, transaction } from "../db.js";
-import { requireAuth } from "../auth.js";
+import { requireAccess } from "../auth.js";
 import { parsePlayersCsv } from "../csvImport.js";
 
 export const playersRouter = Router();
-playersRouter.use(requireAuth);
+playersRouter.use(requireAccess);
 
 const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
 

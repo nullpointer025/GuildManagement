@@ -2,13 +2,12 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store/auth";
 
 export function Navbar() {
-  const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
 
   async function handleLogout() {
     await logout();
-    navigate("/login");
+    navigate("/enter");
   }
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
@@ -34,12 +33,11 @@ export function Navbar() {
           </nav>
         </div>
         <div className="flex items-center gap-4">
-          {user && <span className="text-base text-ink-dim">{user.username}</span>}
           <button
             onClick={handleLogout}
             className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim transition-colors hover:border-danger hover:text-danger"
           >
-            Log out
+            Lock
           </button>
         </div>
       </div>

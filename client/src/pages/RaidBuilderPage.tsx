@@ -60,13 +60,41 @@ export function RaidBuilderPage() {
     };
   }, [raidId]);
 
-  // Keep the export range in sync with the raid's actual party count, without
-  // clobbering a smaller range the officer deliberately picked.
+  // Keep the export range in sync with the active board's actual party count,
+  // without clobbering a smaller range the officer deliberately picked.
+  const activeBoardPartyCount = raid?.boards[activeBoard].parties.length;
   useEffect(() => {
-    if (!raid) return;
-    setExportTo((prev) => Math.min(prev, raid.party_count) || raid.party_count);
-    setExportFrom((prev) => Math.min(prev, raid.party_count) || 1);
-  }, [raid?.party_count]);
+    if (!activeBoardPartyCount) return;
+    setExportTo((prev) => Math.min(prev, activeBoardPartyCount) || activeBoardPartyCount);
+    setExportFrom((prev) => Math.min(prev, activeBoardPartyCount) || 1);
+  }, [activeBoardPartyCount]);
+
+  // Live sync: pick up other officers' edits to this raid. Skipped while the
+  // export overlay is up or while someone's actively typing, so a poll never
+  // interrupts a capture or clobbers an in-progress edit.
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (exporting) return;
+      const active = document.activeElement;
+      const isTyping = active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
+      if (isTyping) return;
+      try {
+        const { raid: updated } = await api.getRaid(raidId);
+        setRaid(updated);
+      } catch {
+        // transient network hiccup — next tick will retry
+      }
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [raidId, exporting]);
+
+  // Keep the raid-name field showing the latest server value once it's changed
+  // elsewhere, but never while the officer is actively editing it here.
+  useEffect(() => {
+    if (raid && document.activeElement?.id !== "raid-name-input") {
+      setNameDraft(raid.name);
+    }
+  }, [raid?.name]);
 
   const classOptions = useMemo(() => {
     const classes = new Set(
@@ -155,9 +183,10 @@ export function RaidBuilderPage() {
 
   async function handlePartyCountChange(delta: number) {
     if (!raid) return;
-    const next = raid.party_count + delta;
+    const current = raid.boards[activeBoard].parties.length;
+    const next = current + delta;
     if (next < 1 || next > 20) return;
-    const { raid: updated } = await api.updateRaid(raidId, { partyCount: next });
+    const { raid: updated } = await api.updatePartyCount(raidId, activeBoard, next);
     setRaid(updated);
   }
 
@@ -227,7 +256,7 @@ export function RaidBuilderPage() {
 
   const board = raid.boards[activeBoard];
   const totalAssigned = board.parties.flat().filter(Boolean).length;
-  const totalSlots = raid.party_count * 5;
+  const totalSlots = board.parties.length * 5;
   const exportCount = Math.max(1, exportTo - exportFrom + 1);
   const exportCols = Math.min(4, exportCount);
   const exportSlice = board.parties.slice(exportFrom - 1, exportTo);
@@ -244,6 +273,7 @@ export function RaidBuilderPage() {
               ← Back to raid teams
             </button>
             <input
+              id="raid-name-input"
               value={nameDraft}
               onChange={(e) => setNameDraft(e.target.value)}
               onBlur={commitName}
@@ -290,7 +320,7 @@ export function RaidBuilderPage() {
               >
                 −
               </button>
-              <span className="px-3 text-base text-ink">{raid.party_count} parties</span>
+              <span className="px-3 text-base text-ink">{board.parties.length} parties</span>
               <button
                 onClick={() => handlePartyCountChange(1)}
                 className="h-9 w-9 rounded-md text-lg text-ink-dim hover:bg-panel-alt hover:text-ink"
@@ -304,11 +334,11 @@ export function RaidBuilderPage() {
               <input
                 type="number"
                 min={1}
-                max={raid.party_count}
+                max={board.parties.length}
                 value={exportFrom}
                 onChange={(e) => {
                   const n = Number(e.target.value);
-                  const clamped = Math.max(1, Math.min(raid.party_count, Number.isFinite(n) ? n : 1));
+                  const clamped = Math.max(1, Math.min(board.parties.length, Number.isFinite(n) ? n : 1));
                   setExportFrom(clamped);
                   setExportTo((prev) => Math.max(prev, clamped));
                 }}
@@ -318,11 +348,11 @@ export function RaidBuilderPage() {
               <input
                 type="number"
                 min={1}
-                max={raid.party_count}
+                max={board.parties.length}
                 value={exportTo}
                 onChange={(e) => {
                   const n = Number(e.target.value);
-                  const clamped = Math.max(1, Math.min(raid.party_count, Number.isFinite(n) ? n : 1));
+                  const clamped = Math.max(1, Math.min(board.parties.length, Number.isFinite(n) ? n : 1));
                   setExportTo(clamped);
                   setExportFrom((prev) => Math.min(prev, clamped));
                 }}
@@ -413,7 +443,7 @@ export function RaidBuilderPage() {
               </h2>
               <p className="text-sm text-ink-dim">
                 {exportSlice.flat().filter(Boolean).length}/{exportCount * 5} players assigned
-                {(exportFrom > 1 || exportTo < raid.party_count) &&
+                {(exportFrom > 1 || exportTo < board.parties.length) &&
                   ` · Parties ${exportFrom}–${exportTo}`}
               </p>
             </div>

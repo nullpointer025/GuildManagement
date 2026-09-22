@@ -1,4 +1,4 @@
-import type { ImportSummary, Player, RaidBoardKey, RaidDetail, RaidSummary, User } from "../types";
+import type { ImportSummary, Player, RaidBoardKey, RaidDetail, RaidSummary } from "../types";
 
 const BASE = "/api";
 
@@ -28,12 +28,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  register: (payload: { username: string; password: string; inviteCode: string }) =>
-    request<{ user: User }>("/auth/register", { method: "POST", body: JSON.stringify(payload) }),
-  login: (payload: { username: string; password: string }) =>
-    request<{ user: User }>("/auth/login", { method: "POST", body: JSON.stringify(payload) }),
+  enter: (code: string) =>
+    request<{ ok: true }>("/auth/enter", { method: "POST", body: JSON.stringify({ code }) }),
   logout: () => request<{ ok: true }>("/auth/logout", { method: "POST" }),
-  me: () => request<{ user: User }>("/auth/me"),
+  me: () => request<{ unlocked: true }>("/auth/me"),
 
   players: () => request<{ players: Player[] }>("/players"),
   setPlayerActive: (id: number, active: boolean) =>
@@ -51,8 +49,13 @@ export const api = {
   createRaid: (payload: { name: string; partyCount: number }) =>
     request<{ raid: RaidDetail }>("/raids", { method: "POST", body: JSON.stringify(payload) }),
   getRaid: (id: number) => request<{ raid: RaidDetail }>(`/raids/${id}`),
-  updateRaid: (id: number, payload: { name?: string; partyCount?: number }) =>
+  updateRaid: (id: number, payload: { name: string }) =>
     request<{ raid: RaidDetail }>(`/raids/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  updatePartyCount: (id: number, board: RaidBoardKey, partyCount: number) =>
+    request<{ raid: RaidDetail }>(`/raids/${id}/party-count`, {
+      method: "PATCH",
+      body: JSON.stringify({ board, partyCount }),
+    }),
   deleteRaid: (id: number) => request<{ ok: true }>(`/raids/${id}`, { method: "DELETE" }),
   setSlot: (
     id: number,

@@ -17,10 +17,10 @@ export interface Player {
 export interface RaidSummary {
   id: number;
   name: string;
-  party_count: number;
+  mainPartyCount: number;
+  subPartyCount: number;
   created_at: string;
   updated_at: string;
-  created_by_username: string | null;
 }
 
 export type RaidBoardKey = "main" | "sub";
@@ -39,9 +39,4 @@ export interface ImportSummary {
   updated: number;
   flaggedInactive: number;
   activeTotal: number;
-}
-
-export interface User {
-  id: number;
-  username: string;
 }

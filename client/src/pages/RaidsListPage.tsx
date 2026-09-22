@@ -111,11 +111,10 @@ export function RaidsListPage() {
             >
               <h3 className="truncate pr-6 text-lg font-semibold text-heading">{raid.name}</h3>
               <p className="mt-1.5 text-sm text-ink-dim">
-                {raid.party_count} parties · {raid.party_count * 5} slots
+                Main: {raid.mainPartyCount} parties · Sub: {raid.subPartyCount} parties
               </p>
               <p className="mt-4 text-sm text-ink-dim">
                 Updated {new Date(raid.updated_at).toLocaleString()}
-                {raid.created_by_username && ` · by ${raid.created_by_username}`}
               </p>
             </button>
             <button
