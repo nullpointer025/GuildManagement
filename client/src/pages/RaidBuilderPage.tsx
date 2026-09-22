@@ -33,7 +33,8 @@ export function RaidBuilderPage() {
   const [activeDrag, setActiveDrag] = useState<Player | null>(null);
   const [nameDraft, setNameDraft] = useState("");
   const [exporting, setExporting] = useState(false);
-  const [exportUpTo, setExportUpTo] = useState(8);
+  const [exportFrom, setExportFrom] = useState(1);
+  const [exportTo, setExportTo] = useState(8);
   const exportRef = useRef<HTMLDivElement>(null);
 
   const sensors = useSensors(
@@ -58,10 +59,11 @@ export function RaidBuilderPage() {
   }, [raidId]);
 
   // Keep the export range in sync with the raid's actual party count, without
-  // clobbering a smaller value the officer deliberately picked.
+  // clobbering a smaller range the officer deliberately picked.
   useEffect(() => {
     if (!raid) return;
-    setExportUpTo((prev) => Math.min(prev, raid.party_count) || raid.party_count);
+    setExportTo((prev) => Math.min(prev, raid.party_count) || raid.party_count);
+    setExportFrom((prev) => Math.min(prev, raid.party_count) || 1);
   }, [raid?.party_count]);
 
   const classOptions = useMemo(() => {
@@ -213,7 +215,9 @@ export function RaidBuilderPage() {
 
   const totalAssigned = raid.parties.flat().filter(Boolean).length;
   const totalSlots = raid.party_count * 5;
-  const exportCols = Math.min(4, exportUpTo || 1);
+  const exportCount = Math.max(1, exportTo - exportFrom + 1);
+  const exportCols = Math.min(4, exportCount);
+  const exportSlice = raid.parties.slice(exportFrom - 1, exportTo);
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
@@ -256,15 +260,31 @@ export function RaidBuilderPage() {
               </button>
             </div>
             <div className="flex items-center gap-1 rounded-lg border border-border p-1">
-              <span className="pl-2 text-sm text-ink-dim">Export up to</span>
+              <span className="pl-2 text-sm text-ink-dim">Export parties</span>
               <input
                 type="number"
                 min={1}
                 max={raid.party_count}
-                value={exportUpTo}
+                value={exportFrom}
                 onChange={(e) => {
                   const n = Number(e.target.value);
-                  setExportUpTo(Math.max(1, Math.min(raid.party_count, Number.isFinite(n) ? n : 1)));
+                  const clamped = Math.max(1, Math.min(raid.party_count, Number.isFinite(n) ? n : 1));
+                  setExportFrom(clamped);
+                  setExportTo((prev) => Math.max(prev, clamped));
+                }}
+                className="w-14 rounded-md border border-transparent bg-panel-alt px-2 py-1 text-center text-sm text-ink outline-none focus:border-gold"
+              />
+              <span className="text-sm text-ink-dim">to</span>
+              <input
+                type="number"
+                min={1}
+                max={raid.party_count}
+                value={exportTo}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  const clamped = Math.max(1, Math.min(raid.party_count, Number.isFinite(n) ? n : 1));
+                  setExportTo(clamped);
+                  setExportFrom((prev) => Math.min(prev, clamped));
                 }}
                 className="w-14 rounded-md border border-transparent bg-panel-alt px-2 py-1 text-center text-sm text-ink outline-none focus:border-gold"
               />
@@ -350,12 +370,9 @@ export function RaidBuilderPage() {
             <div className="mb-4 px-1">
               <h2 className="text-xl font-bold text-heading">{raid.name}</h2>
               <p className="text-sm text-ink-dim">
-                {raid.parties
-                  .slice(0, exportUpTo)
-                  .flat()
-                  .filter(Boolean).length}
-                /{exportUpTo * 5} players assigned
-                {exportUpTo < raid.party_count && ` · Parties 1–${exportUpTo}`}
+                {exportSlice.flat().filter(Boolean).length}/{exportCount * 5} players assigned
+                {(exportFrom > 1 || exportTo < raid.party_count) &&
+                  ` · Parties ${exportFrom}–${exportTo}`}
               </p>
             </div>
             <div
@@ -365,14 +382,17 @@ export function RaidBuilderPage() {
                 gridTemplateColumns: `repeat(${exportCols}, 1fr)`,
               }}
             >
-              {raid.parties.slice(0, exportUpTo).map((members, partyIndex) => (
-                <ExportParty
-                  key={partyIndex}
-                  partyIndex={partyIndex}
-                  name={raid.partyNames[partyIndex] ?? null}
-                  members={members}
-                />
-              ))}
+              {exportSlice.map((members, i) => {
+                const partyIndex = exportFrom - 1 + i;
+                return (
+                  <ExportParty
+                    key={partyIndex}
+                    partyIndex={partyIndex}
+                    name={raid.partyNames[partyIndex] ?? null}
+                    members={members}
+                  />
+                );
+              })}
             </div>
           </div>
         </div>
