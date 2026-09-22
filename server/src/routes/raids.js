@@ -191,6 +191,22 @@ raidsRouter.patch("/:id/party-count", (req, res) => {
   res.json({ raid: getRaidWithSlots(id) });
 });
 
+// Shared notes for the whole raid (not per-board). notes_updated_at is tracked
+// separately from updated_at so clients can tell "someone edited the notes"
+// apart from routine slot/party activity, to drive an unread indicator.
+raidsRouter.patch("/:id/notes", (req, res) => {
+  const id = Number(req.params.id);
+  const raid = db.prepare("SELECT * FROM raids WHERE id = ?").get(id);
+  if (!raid) return res.status(404).json({ error: "Raid not found" });
+
+  const notes = typeof req.body?.notes === "string" ? req.body.notes : "";
+  db.prepare(
+    "UPDATE raids SET notes = ?, notes_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+  ).run(notes, id);
+
+  res.json({ raid: getRaidWithSlots(id) });
+});
+
 raidsRouter.delete("/:id", (req, res) => {
   const id = Number(req.params.id);
   const info = db.prepare("DELETE FROM raids WHERE id = ?").run(id);

@@ -17,6 +17,7 @@ import { Party } from "../components/Party";
 import { ExportParty } from "../components/ExportParty";
 import { PlayerCard } from "../components/PlayerCard";
 import { PlayerPickerModal } from "../components/PlayerPickerModal";
+import { NotesModal } from "../components/NotesModal";
 
 type SortKey = "gear_score" | "level" | "ign" | "class";
 
@@ -40,7 +41,11 @@ export function RaidBuilderPage() {
   const [pickerTarget, setPickerTarget] = useState<{ partyIndex: number; slotIndex: number } | null>(
     null
   );
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [savingNotes, setSavingNotes] = useState(false);
+  const [notesUnseen, setNotesUnseen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
+  const notesSeenKey = `guild-notes-seen-${raidId}`;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
@@ -99,6 +104,15 @@ export function RaidBuilderPage() {
       setNameDraft(raid.name);
     }
   }, [raid?.name]);
+
+  // Flag the Notes button whenever the notes have changed since this browser
+  // last viewed them — there are no accounts, so "seen" is tracked per device.
+  useEffect(() => {
+    if (!raid?.notes_updated_at) return;
+    const seen = localStorage.getItem(notesSeenKey);
+    setNotesUnseen(raid.notes_updated_at !== seen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [raid?.notes_updated_at]);
 
   const classOptions = useMemo(() => {
     const classes = new Set(
@@ -212,6 +226,29 @@ export function RaidBuilderPage() {
     if (!pickerTarget) return;
     await setSlot(pickerTarget.partyIndex, pickerTarget.slotIndex, player.id);
     setPickerTarget(null);
+  }
+
+  function handleOpenNotes() {
+    if (raid?.notes_updated_at) {
+      localStorage.setItem(notesSeenKey, raid.notes_updated_at);
+    }
+    setNotesUnseen(false);
+    setNotesOpen(true);
+  }
+
+  async function handleSaveNotes(notes: string) {
+    setSavingNotes(true);
+    try {
+      const { raid: updated } = await api.updateNotes(raidId, notes.trim());
+      setRaid(updated);
+      if (updated.notes_updated_at) {
+        localStorage.setItem(notesSeenKey, updated.notes_updated_at);
+      }
+      setNotesUnseen(false);
+      setNotesOpen(false);
+    } finally {
+      setSavingNotes(false);
+    }
   }
 
   async function handleDeleteRaid() {
@@ -370,6 +407,19 @@ export function RaidBuilderPage() {
               />
             </div>
             <button
+              onClick={handleOpenNotes}
+              className="relative rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold"
+            >
+              Notes
+              {notesUnseen && (
+                <span
+                  className="absolute -right-1 -top-1 h-3 w-3 rounded-full border-2 border-bg bg-gold"
+                  aria-label="Notes updated"
+                  title="Notes updated"
+                />
+              )}
+            </button>
+            <button
               onClick={handleExportImage}
               disabled={exporting}
               className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:opacity-60"
@@ -448,6 +498,15 @@ export function RaidBuilderPage() {
           players={pool}
           onSelect={handlePickPlayer}
           onClose={() => setPickerTarget(null)}
+        />
+      )}
+
+      {notesOpen && (
+        <NotesModal
+          initialNotes={raid.notes ?? ""}
+          saving={savingNotes}
+          onSave={handleSaveNotes}
+          onClose={() => setNotesOpen(false)}
         />
       )}
 

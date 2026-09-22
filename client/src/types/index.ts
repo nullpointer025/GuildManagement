@@ -32,6 +32,8 @@ export interface RaidBoard {
 
 export interface RaidDetail extends RaidSummary {
   boards: Record<RaidBoardKey, RaidBoard>;
+  notes: string | null;
+  notes_updated_at: string | null;
 }
 
 export interface ImportSummary {

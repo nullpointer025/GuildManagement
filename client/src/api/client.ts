@@ -66,6 +66,11 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ board, name }),
     }),
+  updateNotes: (id: number, notes: string) =>
+    request<{ raid: RaidDetail }>(`/raids/${id}/notes`, {
+      method: "PATCH",
+      body: JSON.stringify({ notes }),
+    }),
 };
 
 export { ApiError };

@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS players (
 CREATE TABLE IF NOT EXISTS raids (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
+  notes TEXT,
+  notes_updated_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -171,5 +173,18 @@ function migrateRemoveAccountsAndSharedPartyCount() {
   txn();
 }
 
+// One-time migration adding the shared per-raid notes field (plain ADD COLUMN is
+// safe here — no unique/constraint changes needed, unlike the rebuilds above).
+function migrateAddNotesColumns() {
+  const columns = db.prepare("PRAGMA table_info(raids)").all();
+  if (!columns.some((c) => c.name === "notes")) {
+    db.exec("ALTER TABLE raids ADD COLUMN notes TEXT");
+  }
+  if (!columns.some((c) => c.name === "notes_updated_at")) {
+    db.exec("ALTER TABLE raids ADD COLUMN notes_updated_at TEXT");
+  }
+}
+
 migrateAddBoardColumn();
 migrateRemoveAccountsAndSharedPartyCount();
+migrateAddNotesColumns();
