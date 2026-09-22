@@ -23,9 +23,15 @@ export interface RaidSummary {
   created_by_username: string | null;
 }
 
-export interface RaidDetail extends RaidSummary {
+export type RaidBoardKey = "main" | "sub";
+
+export interface RaidBoard {
   parties: (Player | null)[][];
   partyNames: (string | null)[];
+}
+
+export interface RaidDetail extends RaidSummary {
+  boards: Record<RaidBoardKey, RaidBoard>;
 }
 
 export interface ImportSummary {

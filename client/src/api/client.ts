@@ -1,4 +1,4 @@
-import type { ImportSummary, Player, RaidDetail, RaidSummary, User } from "../types";
+import type { ImportSummary, Player, RaidBoardKey, RaidDetail, RaidSummary, User } from "../types";
 
 const BASE = "/api";
 
@@ -54,12 +54,14 @@ export const api = {
   updateRaid: (id: number, payload: { name?: string; partyCount?: number }) =>
     request<{ raid: RaidDetail }>(`/raids/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteRaid: (id: number) => request<{ ok: true }>(`/raids/${id}`, { method: "DELETE" }),
-  setSlot: (id: number, payload: { partyIndex: number; slotIndex: number; playerId: number | null }) =>
-    request<{ raid: RaidDetail }>(`/raids/${id}/slots`, { method: "PUT", body: JSON.stringify(payload) }),
-  renameParty: (id: number, partyIndex: number, name: string) =>
+  setSlot: (
+    id: number,
+    payload: { board: RaidBoardKey; partyIndex: number; slotIndex: number; playerId: number | null }
+  ) => request<{ raid: RaidDetail }>(`/raids/${id}/slots`, { method: "PUT", body: JSON.stringify(payload) }),
+  renameParty: (id: number, partyIndex: number, board: RaidBoardKey, name: string) =>
     request<{ raid: RaidDetail }>(`/raids/${id}/parties/${partyIndex}`, {
       method: "PATCH",
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ board, name }),
     }),
 };
 

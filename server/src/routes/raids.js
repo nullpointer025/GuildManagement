@@ -5,22 +5,37 @@ import { requireAuth } from "../auth.js";
 export const raidsRouter = Router();
 raidsRouter.use(requireAuth);
 
+const BOARDS = ["main", "sub"];
+
+function isValidBoard(board) {
+  return BOARDS.includes(board);
+}
+
 function createEmptySlots(raidId, partyCount) {
   const insertSlot = db.prepare(
-    "INSERT INTO raid_slots (raid_id, party_index, slot_index, player_id) VALUES (?, ?, ?, NULL)"
+    "INSERT INTO raid_slots (raid_id, board, party_index, slot_index, player_id) VALUES (?, ?, ?, ?, NULL)"
   );
   const insertParty = db.prepare(
-    "INSERT INTO raid_parties (raid_id, party_index, name) VALUES (?, ?, NULL)"
+    "INSERT INTO raid_parties (raid_id, board, party_index, name) VALUES (?, ?, ?, NULL)"
   );
   const txn = transaction(() => {
-    for (let p = 0; p < partyCount; p++) {
-      insertParty.run(raidId, p);
-      for (let s = 0; s < 5; s++) {
-        insertSlot.run(raidId, p, s);
+    for (const board of BOARDS) {
+      for (let p = 0; p < partyCount; p++) {
+        insertParty.run(raidId, board, p);
+        for (let s = 0; s < 5; s++) {
+          insertSlot.run(raidId, board, p, s);
+        }
       }
     }
   });
   txn();
+}
+
+function emptyBoard(partyCount) {
+  return {
+    parties: Array.from({ length: partyCount }, () => Array(5).fill(null)),
+    partyNames: Array(partyCount).fill(null),
+  };
 }
 
 function getRaidWithSlots(raidId) {
@@ -33,9 +48,11 @@ function getRaidWithSlots(raidId) {
     .get(raidId);
   if (!raid) return null;
 
+  const boards = { main: emptyBoard(raid.party_count), sub: emptyBoard(raid.party_count) };
+
   const slots = db
     .prepare(
-      `SELECT rs.party_index, rs.slot_index, rs.player_id, p.*
+      `SELECT rs.board, rs.party_index, rs.slot_index, rs.player_id, p.*
        FROM raid_slots rs
        LEFT JOIN players p ON p.id = rs.player_id
        WHERE rs.raid_id = ?
@@ -43,8 +60,9 @@ function getRaidWithSlots(raidId) {
     )
     .all(raidId);
 
-  const parties = Array.from({ length: raid.party_count }, () => Array(5).fill(null));
   for (const row of slots) {
+    const board = boards[row.board];
+    if (!board) continue;
     const player = row.player_id
       ? {
           id: row.player_id,
@@ -62,20 +80,22 @@ function getRaidWithSlots(raidId) {
           active: row.active,
         }
       : null;
-    if (parties[row.party_index]) {
-      parties[row.party_index][row.slot_index] = player;
+    if (board.parties[row.party_index]) {
+      board.parties[row.party_index][row.slot_index] = player;
     }
   }
 
-  const partyNames = Array(raid.party_count).fill(null);
   const nameRows = db
-    .prepare("SELECT party_index, name FROM raid_parties WHERE raid_id = ?")
+    .prepare("SELECT board, party_index, name FROM raid_parties WHERE raid_id = ?")
     .all(raidId);
   for (const row of nameRows) {
-    if (row.party_index < partyNames.length) partyNames[row.party_index] = row.name;
+    const board = boards[row.board];
+    if (board && row.party_index < board.partyNames.length) {
+      board.partyNames[row.party_index] = row.name;
+    }
   }
 
-  return { ...raid, parties, partyNames };
+  return { ...raid, boards };
 }
 
 raidsRouter.get("/", (req, res) => {
@@ -136,15 +156,17 @@ raidsRouter.patch("/:id", (req, res) => {
     }
     if (count > existing.party_count) {
       const insertSlot = db.prepare(
-        "INSERT INTO raid_slots (raid_id, party_index, slot_index, player_id) VALUES (?, ?, ?, NULL)"
+        "INSERT INTO raid_slots (raid_id, board, party_index, slot_index, player_id) VALUES (?, ?, ?, ?, NULL)"
       );
       const insertParty = db.prepare(
-        "INSERT INTO raid_parties (raid_id, party_index, name) VALUES (?, ?, NULL)"
+        "INSERT INTO raid_parties (raid_id, board, party_index, name) VALUES (?, ?, ?, NULL)"
       );
       const txn = transaction(() => {
-        for (let p = existing.party_count; p < count; p++) {
-          insertParty.run(id, p);
-          for (let s = 0; s < 5; s++) insertSlot.run(id, p, s);
+        for (const board of BOARDS) {
+          for (let p = existing.party_count; p < count; p++) {
+            insertParty.run(id, board, p);
+            for (let s = 0; s < 5; s++) insertSlot.run(id, board, p, s);
+          }
         }
       });
       txn();
@@ -174,15 +196,17 @@ raidsRouter.delete("/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-// Assign (or clear) a single slot. Clears the player's previous slot in this raid, if any,
-// so the same player can never occupy two slots in one raid.
+// Assign (or clear) a single slot on one board. Clears the player's previous slot
+// anywhere in this raid — on EITHER board — so a player can never be double-booked
+// between Main and Sub, nor hold two slots on the same board.
 raidsRouter.put("/:id/slots", (req, res) => {
   const raidId = Number(req.params.id);
   const raid = db.prepare("SELECT * FROM raids WHERE id = ?").get(raidId);
   if (!raid) return res.status(404).json({ error: "Raid not found" });
 
-  const { partyIndex, slotIndex, playerId } = req.body ?? {};
+  const { board, partyIndex, slotIndex, playerId } = req.body ?? {};
   if (
+    !isValidBoard(board) ||
     !Number.isInteger(partyIndex) ||
     !Number.isInteger(slotIndex) ||
     partyIndex < 0 ||
@@ -190,18 +214,19 @@ raidsRouter.put("/:id/slots", (req, res) => {
     slotIndex < 0 ||
     slotIndex >= 5
   ) {
-    return res.status(400).json({ error: "Invalid party/slot index" });
+    return res.status(400).json({ error: "Invalid board/party/slot index" });
   }
 
   const txn = transaction(() => {
     if (playerId != null) {
-      db.prepare(
-        "UPDATE raid_slots SET player_id = NULL WHERE raid_id = ? AND player_id = ?"
-      ).run(raidId, playerId);
+      db.prepare("UPDATE raid_slots SET player_id = NULL WHERE raid_id = ? AND player_id = ?").run(
+        raidId,
+        playerId
+      );
     }
     db.prepare(
-      "UPDATE raid_slots SET player_id = ? WHERE raid_id = ? AND party_index = ? AND slot_index = ?"
-    ).run(playerId ?? null, raidId, partyIndex, slotIndex);
+      "UPDATE raid_slots SET player_id = ? WHERE raid_id = ? AND board = ? AND party_index = ? AND slot_index = ?"
+    ).run(playerId ?? null, raidId, board, partyIndex, slotIndex);
     db.prepare("UPDATE raids SET updated_at = datetime('now') WHERE id = ?").run(raidId);
   });
   txn();
@@ -209,22 +234,29 @@ raidsRouter.put("/:id/slots", (req, res) => {
   res.json({ raid: getRaidWithSlots(raidId) });
 });
 
-// Set (or clear, with an empty/omitted name) a party's custom display name.
+// Set (or clear, with an empty/omitted name) a party's custom display name on one board.
 raidsRouter.patch("/:id/parties/:partyIndex", (req, res) => {
   const raidId = Number(req.params.id);
   const partyIndex = Number(req.params.partyIndex);
   const raid = db.prepare("SELECT * FROM raids WHERE id = ?").get(raidId);
   if (!raid) return res.status(404).json({ error: "Raid not found" });
-  if (!Number.isInteger(partyIndex) || partyIndex < 0 || partyIndex >= raid.party_count) {
-    return res.status(400).json({ error: "Invalid party index" });
+
+  const { board } = req.body ?? {};
+  if (
+    !isValidBoard(board) ||
+    !Number.isInteger(partyIndex) ||
+    partyIndex < 0 ||
+    partyIndex >= raid.party_count
+  ) {
+    return res.status(400).json({ error: "Invalid board/party index" });
   }
 
   const name = typeof req.body?.name === "string" ? req.body.name.trim() || null : null;
 
   db.prepare(
-    `INSERT INTO raid_parties (raid_id, party_index, name) VALUES (?, ?, ?)
-     ON CONFLICT(raid_id, party_index) DO UPDATE SET name = excluded.name`
-  ).run(raidId, partyIndex, name);
+    `INSERT INTO raid_parties (raid_id, board, party_index, name) VALUES (?, ?, ?, ?)
+     ON CONFLICT(raid_id, board, party_index) DO UPDATE SET name = excluded.name`
+  ).run(raidId, board, partyIndex, name);
   db.prepare("UPDATE raids SET updated_at = datetime('now') WHERE id = ?").run(raidId);
 
   res.json({ raid: getRaidWithSlots(raidId) });

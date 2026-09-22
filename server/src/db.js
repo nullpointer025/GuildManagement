@@ -68,13 +68,16 @@ CREATE TABLE IF NOT EXISTS raids (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- "board" splits each raid into two independent party grids ('main' and 'sub')
+-- that share the same raid/party_count shell but hold separate assignments.
 CREATE TABLE IF NOT EXISTS raid_slots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   raid_id INTEGER NOT NULL REFERENCES raids(id) ON DELETE CASCADE,
+  board TEXT NOT NULL DEFAULT 'main',
   party_index INTEGER NOT NULL,
   slot_index INTEGER NOT NULL,
   player_id INTEGER REFERENCES players(id) ON DELETE SET NULL,
-  UNIQUE(raid_id, party_index, slot_index)
+  UNIQUE(raid_id, board, party_index, slot_index)
 );
 
 CREATE INDEX IF NOT EXISTS idx_raid_slots_raid ON raid_slots(raid_id);
@@ -82,10 +85,70 @@ CREATE INDEX IF NOT EXISTS idx_raid_slots_raid ON raid_slots(raid_id);
 CREATE TABLE IF NOT EXISTS raid_parties (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   raid_id INTEGER NOT NULL REFERENCES raids(id) ON DELETE CASCADE,
+  board TEXT NOT NULL DEFAULT 'main',
   party_index INTEGER NOT NULL,
   name TEXT,
-  UNIQUE(raid_id, party_index)
+  UNIQUE(raid_id, board, party_index)
 );
 
 CREATE INDEX IF NOT EXISTS idx_raid_parties_raid ON raid_parties(raid_id);
 `);
+
+// One-time migration for databases created before the "board" column existed:
+// rebuild raid_slots/raid_parties with the new unique constraints (SQLite can't
+// alter a UNIQUE constraint in place), tag existing rows as the 'main' board,
+// and give every existing raid an empty 'sub' board to match.
+function migrateAddBoardColumn() {
+  const columns = db.prepare("PRAGMA table_info(raid_slots)").all();
+  if (columns.some((c) => c.name === "board")) return;
+
+  const txn = transaction(() => {
+    db.exec(`
+      ALTER TABLE raid_slots RENAME TO raid_slots_old;
+      CREATE TABLE raid_slots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        raid_id INTEGER NOT NULL REFERENCES raids(id) ON DELETE CASCADE,
+        board TEXT NOT NULL DEFAULT 'main',
+        party_index INTEGER NOT NULL,
+        slot_index INTEGER NOT NULL,
+        player_id INTEGER REFERENCES players(id) ON DELETE SET NULL,
+        UNIQUE(raid_id, board, party_index, slot_index)
+      );
+      INSERT INTO raid_slots (id, raid_id, board, party_index, slot_index, player_id)
+        SELECT id, raid_id, 'main', party_index, slot_index, player_id FROM raid_slots_old;
+      DROP TABLE raid_slots_old;
+      CREATE INDEX IF NOT EXISTS idx_raid_slots_raid ON raid_slots(raid_id);
+
+      ALTER TABLE raid_parties RENAME TO raid_parties_old;
+      CREATE TABLE raid_parties (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        raid_id INTEGER NOT NULL REFERENCES raids(id) ON DELETE CASCADE,
+        board TEXT NOT NULL DEFAULT 'main',
+        party_index INTEGER NOT NULL,
+        name TEXT,
+        UNIQUE(raid_id, board, party_index)
+      );
+      INSERT INTO raid_parties (id, raid_id, board, party_index, name)
+        SELECT id, raid_id, 'main', party_index, name FROM raid_parties_old;
+      DROP TABLE raid_parties_old;
+      CREATE INDEX IF NOT EXISTS idx_raid_parties_raid ON raid_parties(raid_id);
+    `);
+
+    const raids = db.prepare("SELECT id, party_count FROM raids").all();
+    const insertSlot = db.prepare(
+      "INSERT INTO raid_slots (raid_id, board, party_index, slot_index, player_id) VALUES (?, 'sub', ?, ?, NULL)"
+    );
+    const insertParty = db.prepare(
+      "INSERT INTO raid_parties (raid_id, board, party_index, name) VALUES (?, 'sub', ?, NULL)"
+    );
+    for (const raid of raids) {
+      for (let p = 0; p < raid.party_count; p++) {
+        insertParty.run(raid.id, p);
+        for (let s = 0; s < 5; s++) insertSlot.run(raid.id, p, s);
+      }
+    }
+  });
+  txn();
+}
+
+migrateAddBoardColumn();

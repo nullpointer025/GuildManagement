@@ -10,7 +10,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { api } from "../api/client";
-import type { Player, RaidDetail } from "../types";
+import type { Player, RaidBoardKey, RaidDetail } from "../types";
 import type { DragOrigin } from "../components/DraggablePlayer";
 import { PoolPanel } from "../components/PoolPanel";
 import { Party } from "../components/Party";
@@ -27,6 +27,7 @@ export function RaidBuilderPage() {
   const [raid, setRaid] = useState<RaidDetail | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeBoard, setActiveBoard] = useState<RaidBoardKey>("main");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("gear_score");
   const [classFilter, setClassFilter] = useState<string>("all");
@@ -50,6 +51,7 @@ export function RaidBuilderPage() {
       setRaid(raidRes.raid);
       setNameDraft(raidRes.raid.name);
       setPlayers(playersRes.players);
+      setActiveBoard("main");
       setLoading(false);
     }
     load();
@@ -75,7 +77,12 @@ export function RaidBuilderPage() {
 
   const pool = useMemo(() => {
     if (!raid) return [];
-    const assigned = new Set(raid.parties.flat().filter(Boolean).map((p) => (p as Player).id));
+    // A player assigned on either board is unavailable on both — Main and Sub share one pool.
+    const assigned = new Set(
+      [...raid.boards.main.parties.flat(), ...raid.boards.sub.parties.flat()]
+        .filter(Boolean)
+        .map((p) => (p as Player).id)
+    );
     const q = search.trim().toLowerCase();
     return players
       .filter((p) => p.active === 1 && !assigned.has(p.id))
@@ -95,7 +102,12 @@ export function RaidBuilderPage() {
   }, [raid, players, search, sortKey, classFilter]);
 
   async function setSlot(partyIndex: number, slotIndex: number, playerId: number | null) {
-    const { raid: updated } = await api.setSlot(raidId, { partyIndex, slotIndex, playerId });
+    const { raid: updated } = await api.setSlot(raidId, {
+      board: activeBoard,
+      partyIndex,
+      slotIndex,
+      playerId,
+    });
     setRaid(updated);
     return updated;
   }
@@ -133,7 +145,7 @@ export function RaidBuilderPage() {
       return;
     }
 
-    const occupant = raid.parties[partyIndex]?.[slotIndex] ?? null;
+    const occupant = raid.boards[activeBoard].parties[partyIndex]?.[slotIndex] ?? null;
     await setSlot(partyIndex, slotIndex, activeData.player.id);
 
     if (occupant && activeData.from.type === "slot") {
@@ -159,7 +171,7 @@ export function RaidBuilderPage() {
   }
 
   async function handleRenameParty(partyIndex: number, name: string) {
-    const { raid: updated } = await api.renameParty(raidId, partyIndex, name);
+    const { raid: updated } = await api.renameParty(raidId, partyIndex, activeBoard, name);
     setRaid(updated);
   }
 
@@ -193,7 +205,7 @@ export function RaidBuilderPage() {
         });
         const link = document.createElement("a");
         const safeName = raid.name.trim().replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "raid-team";
-        link.download = `${safeName}.png`;
+        link.download = `${safeName}${activeBoard === "sub" ? "-sub" : ""}.png`;
         link.href = dataUrl;
         link.click();
       } catch (err) {
@@ -213,11 +225,12 @@ export function RaidBuilderPage() {
     return <p className="text-base text-ink-dim">Loading raid…</p>;
   }
 
-  const totalAssigned = raid.parties.flat().filter(Boolean).length;
+  const board = raid.boards[activeBoard];
+  const totalAssigned = board.parties.flat().filter(Boolean).length;
   const totalSlots = raid.party_count * 5;
   const exportCount = Math.max(1, exportTo - exportFrom + 1);
   const exportCols = Math.min(4, exportCount);
-  const exportSlice = raid.parties.slice(exportFrom - 1, exportTo);
+  const exportSlice = board.parties.slice(exportFrom - 1, exportTo);
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
@@ -238,10 +251,37 @@ export function RaidBuilderPage() {
               className="w-full max-w-lg rounded-lg border border-transparent bg-transparent px-1.5 text-3xl font-bold text-heading outline-none hover:border-border focus:border-gold focus:bg-panel-alt"
             />
             <p className="mt-1.5 px-1.5 text-base text-ink-dim">
-              {totalAssigned}/{totalSlots} players assigned
+              {totalAssigned}/{totalSlots} players assigned ·{" "}
+              <span className={activeBoard === "main" ? "text-gold" : "text-ink-dim"}>
+                {activeBoard === "main" ? "Main" : "Sub"} roster
+              </span>
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1 rounded-lg border border-border p-1">
+              <button
+                onClick={() => setActiveBoard("main")}
+                className={[
+                  "rounded-md px-4 py-1.5 text-sm font-semibold transition-colors",
+                  activeBoard === "main"
+                    ? "bg-gold text-bg"
+                    : "text-ink-dim hover:bg-panel-alt hover:text-ink",
+                ].join(" ")}
+              >
+                MAIN
+              </button>
+              <button
+                onClick={() => setActiveBoard("sub")}
+                className={[
+                  "rounded-md px-4 py-1.5 text-sm font-semibold transition-colors",
+                  activeBoard === "sub"
+                    ? "bg-gold text-bg"
+                    : "text-ink-dim hover:bg-panel-alt hover:text-ink",
+                ].join(" ")}
+              >
+                SUB
+              </button>
+            </div>
             <div className="flex items-center gap-1 rounded-lg border border-border p-1">
               <button
                 onClick={() => handlePartyCountChange(-1)}
@@ -344,11 +384,11 @@ export function RaidBuilderPage() {
           </div>
 
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-            {raid.parties.map((members, partyIndex) => (
+            {board.parties.map((members, partyIndex) => (
               <Party
-                key={partyIndex}
+                key={`${activeBoard}-${partyIndex}`}
                 partyIndex={partyIndex}
-                name={raid.partyNames[partyIndex] ?? null}
+                name={board.partyNames[partyIndex] ?? null}
                 members={members}
                 onRemove={(slotIndex) => setSlot(partyIndex, slotIndex, null)}
                 onRename={(name) => handleRenameParty(partyIndex, name)}
@@ -368,7 +408,9 @@ export function RaidBuilderPage() {
           <p className="text-sm text-ink-dim">Generating image…</p>
           <div ref={exportRef} className="rounded-2xl bg-bg p-2">
             <div className="mb-4 px-1">
-              <h2 className="text-xl font-bold text-heading">{raid.name}</h2>
+              <h2 className="text-xl font-bold text-heading">
+                {raid.name} <span className="text-ink-dim">— {activeBoard === "main" ? "Main" : "Sub"}</span>
+              </h2>
               <p className="text-sm text-ink-dim">
                 {exportSlice.flat().filter(Boolean).length}/{exportCount * 5} players assigned
                 {(exportFrom > 1 || exportTo < raid.party_count) &&
@@ -388,7 +430,7 @@ export function RaidBuilderPage() {
                   <ExportParty
                     key={partyIndex}
                     partyIndex={partyIndex}
-                    name={raid.partyNames[partyIndex] ?? null}
+                    name={board.partyNames[partyIndex] ?? null}
                     members={members}
                   />
                 );
