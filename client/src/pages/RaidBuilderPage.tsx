@@ -386,7 +386,7 @@ export function RaidBuilderPage() {
         </div>
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-[320px_1fr]">
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:self-start">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-dim">
               Available players ({pool.length})
             </h2>
@@ -418,7 +418,7 @@ export function RaidBuilderPage() {
                 </option>
               ))}
             </select>
-            <div className="max-h-[70vh] overflow-y-auto pr-1">
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
               <PoolPanel players={pool} />
             </div>
           </div>
