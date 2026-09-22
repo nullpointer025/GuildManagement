@@ -7,9 +7,10 @@ interface PartySlotProps {
   slotIndex: number;
   player: Player | null;
   onRemove: () => void;
+  onOpenPicker: () => void;
 }
 
-export function PartySlot({ partyIndex, slotIndex, player, onRemove }: PartySlotProps) {
+export function PartySlot({ partyIndex, slotIndex, player, onRemove, onOpenPicker }: PartySlotProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: `slot-${partyIndex}-${slotIndex}`,
     data: { type: "slot", partyIndex, slotIndex },
@@ -30,9 +31,13 @@ export function PartySlot({ partyIndex, slotIndex, player, onRemove }: PartySlot
           onRemove={onRemove}
         />
       ) : (
-        <div className="flex h-[66px] items-center justify-center text-sm text-ink-dim/60">
+        <button
+          type="button"
+          onClick={onOpenPicker}
+          className="flex h-[66px] w-full items-center justify-center rounded-lg text-sm text-ink-dim/60 transition-colors hover:bg-panel-alt hover:text-ink-dim"
+        >
           Slot {slotIndex + 1}
-        </div>
+        </button>
       )}
     </div>
   );

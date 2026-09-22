@@ -8,9 +8,10 @@ interface PartyProps {
   members: (Player | null)[];
   onRemove: (slotIndex: number) => void;
   onRename: (name: string) => void;
+  onOpenPicker: (slotIndex: number) => void;
 }
 
-export function Party({ partyIndex, name, members, onRemove, onRename }: PartyProps) {
+export function Party({ partyIndex, name, members, onRemove, onRename, onOpenPicker }: PartyProps) {
   const [draft, setDraft] = useState(name ?? "");
 
   useEffect(() => {
@@ -61,6 +62,7 @@ export function Party({ partyIndex, name, members, onRemove, onRename }: PartyPr
             slotIndex={slotIndex}
             player={m}
             onRemove={() => onRemove(slotIndex)}
+            onOpenPicker={() => onOpenPicker(slotIndex)}
           />
         ))}
       </div>

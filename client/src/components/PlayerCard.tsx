@@ -5,6 +5,7 @@ interface PlayerCardProps {
   player: Player;
   dragging?: boolean;
   overlay?: boolean;
+  clickable?: boolean;
   onRemove?: () => void;
 }
 
@@ -12,7 +13,7 @@ function formatNumber(n: number | null) {
   return n == null ? "—" : n.toLocaleString();
 }
 
-export function PlayerCard({ player, dragging, overlay, onRemove }: PlayerCardProps) {
+export function PlayerCard({ player, dragging, overlay, clickable, onRemove }: PlayerCardProps) {
   const classColor = getClassColor(player.class);
 
   return (
@@ -22,7 +23,9 @@ export function PlayerCard({ player, dragging, overlay, onRemove }: PlayerCardPr
         "group relative rounded-xl border border-l-4 px-4 py-3 select-none transition-colors",
         overlay
           ? "border-gold bg-panel-soft shadow-2xl shadow-black/50 cursor-grabbing"
-          : "border-border-soft bg-panel-alt hover:border-gold/50 cursor-grab",
+          : clickable
+            ? "border-border-soft bg-panel-alt hover:border-gold hover:bg-panel-soft cursor-pointer"
+            : "border-border-soft bg-panel-alt hover:border-gold/50 cursor-grab",
         dragging ? "opacity-30" : "opacity-100",
       ].join(" ")}
     >

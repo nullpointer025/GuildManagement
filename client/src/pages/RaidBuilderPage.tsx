@@ -16,6 +16,7 @@ import { PoolPanel } from "../components/PoolPanel";
 import { Party } from "../components/Party";
 import { ExportParty } from "../components/ExportParty";
 import { PlayerCard } from "../components/PlayerCard";
+import { PlayerPickerModal } from "../components/PlayerPickerModal";
 
 type SortKey = "gear_score" | "level" | "ign" | "class";
 
@@ -36,6 +37,9 @@ export function RaidBuilderPage() {
   const [exporting, setExporting] = useState(false);
   const [exportFrom, setExportFrom] = useState(1);
   const [exportTo, setExportTo] = useState(8);
+  const [pickerTarget, setPickerTarget] = useState<{ partyIndex: number; slotIndex: number } | null>(
+    null
+  );
   const exportRef = useRef<HTMLDivElement>(null);
 
   const sensors = useSensors(
@@ -202,6 +206,12 @@ export function RaidBuilderPage() {
   async function handleRenameParty(partyIndex: number, name: string) {
     const { raid: updated } = await api.renameParty(raidId, partyIndex, activeBoard, name);
     setRaid(updated);
+  }
+
+  async function handlePickPlayer(player: Player) {
+    if (!pickerTarget) return;
+    await setSlot(pickerTarget.partyIndex, pickerTarget.slotIndex, player.id);
+    setPickerTarget(null);
   }
 
   async function handleDeleteRaid() {
@@ -422,6 +432,7 @@ export function RaidBuilderPage() {
                 members={members}
                 onRemove={(slotIndex) => setSlot(partyIndex, slotIndex, null)}
                 onRename={(name) => handleRenameParty(partyIndex, name)}
+                onOpenPicker={(slotIndex) => setPickerTarget({ partyIndex, slotIndex })}
               />
             ))}
           </div>
@@ -429,6 +440,16 @@ export function RaidBuilderPage() {
       </div>
 
       <DragOverlay>{activeDrag && <PlayerCard player={activeDrag} overlay />}</DragOverlay>
+
+      {pickerTarget && (
+        <PlayerPickerModal
+          partyIndex={pickerTarget.partyIndex}
+          slotIndex={pickerTarget.slotIndex}
+          players={pool}
+          onSelect={handlePickPlayer}
+          onClose={() => setPickerTarget(null)}
+        />
+      )}
 
       {/* Static snapshot captured for "Export as image", mounted only while exporting.
           html-to-image needs the source node genuinely painted on screen (an off-screen or
