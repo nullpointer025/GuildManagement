@@ -99,7 +99,9 @@ playersRouter.post("/import", upload.single("file"), (req, res) => {
         online_status: row.online_status ?? null,
       };
       if (existing) {
-        updateStmt.run({ ...payload, id: existing.id });
+        // node:sqlite rejects named params the statement doesn't reference, so drop ign.
+        const { ign: _ign, ...fields } = payload;
+        updateStmt.run({ ...fields, id: existing.id });
         updated++;
       } else {
         insertStmt.run(payload);
