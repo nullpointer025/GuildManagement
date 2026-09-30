@@ -127,6 +127,29 @@ export function nameContainsIgn(name, ign) {
   return false;
 }
 
+// A name with every space and symbol removed, e.g. "『EQNX』ULYSSS" and
+// "[EQNX] ULYSSS" both become "eqnxuiysss". Only ever compared whole, never as a
+// substring, so dropping the separators can't make "Eve" match "Steve".
+function compactName(name) {
+  return name.replace(/[^\p{L}\p{N}\p{M}]/gu, "");
+}
+
+// Builds the check the sync runs per player: is this IGN one of these members?
+// A player matches when their IGN (or a single-script part of it) appears as a
+// whole word in any member's name, or when both names are equal once spaces and
+// symbols are ignored (for tags written with different brackets or spacing).
+export function createDiscordMatcher(members) {
+  const names = [...new Set(members.flatMap((m) => memberNames(m).map(normalizeName)).filter(Boolean))];
+  const compactNames = new Set(names.map(compactName).filter(Boolean));
+  return (rawIgn) => {
+    const ign = normalizeName(rawIgn);
+    if (!ign) return false;
+    if (compactNames.has(compactName(ign))) return true;
+    const variants = ignVariants(ign);
+    return names.some((name) => variants.some((v) => nameContainsIgn(name, v)));
+  };
+}
+
 // Every name a member could be matched by: server nickname first (what the guild
 // sets to the IGN), then display name and username for members without one.
 export function memberNames(member) {

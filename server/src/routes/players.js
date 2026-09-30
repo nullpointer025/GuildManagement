@@ -3,15 +3,7 @@ import multer from "multer";
 import { db, transaction } from "../db.js";
 import { requireAccess } from "../auth.js";
 import { parsePlayersCsv } from "../csvImport.js";
-import {
-  DiscordError,
-  discordConfigured,
-  fetchGuildMembers,
-  ignVariants,
-  memberNames,
-  nameContainsIgn,
-  normalizeName,
-} from "../discord.js";
+import { DiscordError, createDiscordMatcher, discordConfigured, fetchGuildMembers } from "../discord.js";
 
 export const playersRouter = Router();
 playersRouter.use(requireAccess);
@@ -130,8 +122,9 @@ playersRouter.post("/import", upload.single("file"), (req, res) => {
   });
 });
 
-// Re-checks every player against the guild Discord server's member list (IGN found
-// as a whole word in a nickname, display name or username) and sets in_discord accordingly — overwriting any manual ticks with what Discord reports.
+// Re-checks every player against the guild Discord server's member list (matching
+// rules live in createDiscordMatcher) and sets in_discord accordingly — overwriting
+// any manual ticks with what Discord reports.
 playersRouter.post("/discord-sync", async (req, res, next) => {
   if (!discordConfigured()) {
     return res
@@ -141,10 +134,7 @@ playersRouter.post("/discord-sync", async (req, res, next) => {
 
   try {
     const members = await fetchGuildMembers();
-
-    const discordNames = [
-      ...new Set(members.flatMap((m) => memberNames(m).map(normalizeName)).filter(Boolean)),
-    ];
+    const isInDiscord = createDiscordMatcher(members);
 
     const players = db.prepare("SELECT id, ign, active FROM players").all();
     const setStmt = db.prepare("UPDATE players SET in_discord = ?, updated_at = datetime('now') WHERE id = ?");
@@ -152,8 +142,7 @@ playersRouter.post("/discord-sync", async (req, res, next) => {
     let missing = 0;
     transaction(() => {
       for (const p of players) {
-        const variants = ignVariants(normalizeName(p.ign));
-        const inDiscord = discordNames.some((name) => variants.some((ign) => nameContainsIgn(name, ign)));
+        const inDiscord = isInDiscord(p.ign);
         setStmt.run(inDiscord ? 1 : 0, p.id);
         if (p.active === 1) inDiscord ? matched++ : missing++;
       }
