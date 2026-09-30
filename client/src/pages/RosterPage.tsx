@@ -5,6 +5,9 @@ import { CsvDropzone } from "../components/CsvDropzone";
 
 type SortKey = "gear_score" | "level" | "ign" | "total_contribution";
 
+const BOM = "\uFEFF";
+const CRLF = "\r\n";
+
 export function RosterPage() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
@@ -18,6 +21,7 @@ export function RosterPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncSummary, setSyncSummary] = useState<DiscordSyncSummary | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   async function loadPlayers() {
     setLoading(true);
@@ -96,7 +100,38 @@ export function RosterPage() {
   }, [players, search, sortKey, showInactive, onlyNotInDiscord]);
 
   const activeCount = players.filter((p) => p.active === 1).length;
-  const notInDiscordCount = players.filter((p) => p.active === 1 && p.in_discord !== 1).length;
+  const byIgn = (a: Player, b: Player) => a.ign.localeCompare(b.ign);
+  const notInDiscord = players.filter((p) => p.active === 1 && p.in_discord !== 1).sort(byIgn);
+  const notInDiscordCount = notInDiscord.length;
+  const exportLists: { key: string; label: string; players: Player[] }[] = [
+    { key: "not-in-discord", label: "Not in Discord", players: notInDiscord },
+    { key: "ultimate", label: "Ultimate", players: players.filter((p) => p.active === 1 && p.ultimate === 1).sort(byIgn) },
+  ];
+
+  async function copyIgns(key: string, list: Player[]) {
+    try {
+      await navigator.clipboard.writeText(list.map((p) => p.ign).join("\n"));
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 2000);
+    } catch {
+      setSyncError("Couldn't copy to the clipboard — use the CSV download instead");
+    }
+  }
+
+  function downloadCsv(key: string, list: Player[]) {
+    const cell = (v: string | null) => `"${(v ?? "").replace(/"/g, '""')}"`;
+    const rows = [["IGN", "Class", "Position"], ...list.map((p) => [p.ign, p.class, p.position])].map((r) =>
+      r.map(cell).join(",")
+    );
+    // Leading BOM so Excel reads the file as UTF-8 and shows Thai/Japanese IGNs correctly.
+    const blob = new Blob([BOM + rows.join(CRLF)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${key}-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <div className="flex flex-col gap-8">
@@ -172,6 +207,34 @@ export function RosterPage() {
         >
           {syncing ? "Syncing…" : "Sync with Discord"}
         </button>
+      </div>
+
+      <div className="-mt-4 flex flex-wrap items-center gap-x-8 gap-y-3">
+        {exportLists.map(({ key, label, players: list }) => (
+          <div key={key} className="flex items-center gap-2.5">
+            <span className="text-base text-ink-dim">
+              {label} ({list.length}):
+            </span>
+            <button
+              type="button"
+              onClick={() => copyIgns(key, list)}
+              disabled={list.length === 0}
+              title="Copy these IGNs, one per line"
+              className="rounded-lg border border-border bg-panel-alt px-3 py-1.5 text-sm text-ink hover:border-gold disabled:opacity-50"
+            >
+              {copiedKey === key ? "Copied!" : "Copy IGNs"}
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadCsv(key, list)}
+              disabled={list.length === 0}
+              title="Download IGN, class and position as a CSV file"
+              className="rounded-lg border border-border bg-panel-alt px-3 py-1.5 text-sm text-ink hover:border-gold disabled:opacity-50"
+            >
+              Download CSV
+            </button>
+          </div>
+        ))}
       </div>
 
       {syncError && <p className="-mt-4 text-base text-danger">{syncError}</p>}
