@@ -7,6 +7,7 @@ import {
   DiscordError,
   discordConfigured,
   fetchGuildMembers,
+  ignVariants,
   memberNames,
   nameContainsIgn,
   normalizeName,
@@ -151,8 +152,8 @@ playersRouter.post("/discord-sync", async (req, res, next) => {
     let missing = 0;
     transaction(() => {
       for (const p of players) {
-        const ign = normalizeName(p.ign);
-        const inDiscord = discordNames.some((name) => nameContainsIgn(name, ign));
+        const variants = ignVariants(normalizeName(p.ign));
+        const inDiscord = discordNames.some((name) => variants.some((ign) => nameContainsIgn(name, ign)));
         setStmt.run(inDiscord ? 1 : 0, p.id);
         if (p.active === 1) inDiscord ? matched++ : missing++;
       }

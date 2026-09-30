@@ -66,17 +66,60 @@ export function normalizeName(name) {
     .replace(/[^\p{L}\p{N}\p{M}]+$/u, "");
 }
 
+const SCRIPTS = ["Latin", "Han", "Hiragana", "Katakana", "Hangul", "Thai", "Cyrillic", "Greek", "Arabic"].map(
+  (s) => [s, new RegExp(`\\p{Script=${s}}`, "u")]
+);
+
+function scriptOf(ch) {
+  for (const [name, re] of SCRIPTS) if (re.test(ch)) return name;
+  // Digits, "ー" and combining marks belong to no script, so they join whatever is next to them.
+  return /[\p{Script=Common}\p{Script=Inherited}]/u.test(ch) ? null : "Other";
+}
+
+const isWordChar = (ch) => ch !== undefined && /[\p{L}\p{N}\p{M}]/u.test(ch);
+
+// Two adjacent characters belong to the same word unless one is a space/symbol or
+// they're letters from different writing systems — so "メSkullCracker" reads as
+// "メ" + "SkullCracker", while "Eve2" stays one word.
+function sameWord(a, b) {
+  if (!isWordChar(a) || !isWordChar(b)) return false;
+  const sa = scriptOf(a);
+  const sb = scriptOf(b);
+  return sa === null || sb === null || sa === sb;
+}
+
+// The IGN itself, plus each single-script part of 3+ characters when it mixes
+// writing systems ("メSkullCracker" also tries "skullcracker"). Symbols inside a
+// part are kept, so "Eve_Mage" is never shortened to "eve".
+export function ignVariants(ign) {
+  if (!ign) return [];
+  const chars = [...ign];
+  const parts = [];
+  let start = 0;
+  for (let i = 1; i < chars.length; i++) {
+    if (isWordChar(chars[i - 1]) && isWordChar(chars[i]) && !sameWord(chars[i - 1], chars[i])) {
+      parts.push(chars.slice(start, i).join(""));
+      start = i;
+    }
+  }
+  if (start === 0) return [ign];
+  parts.push(chars.slice(start).join(""));
+  const extra = parts.map(normalizeName).filter((p) => [...p].length >= 3);
+  return [...new Set([ign, ...extra])];
+}
+
 // True when the IGN appears in a Discord name as a whole word — set apart by the
-// name's start/end or any non-letter (space, "/", "|", "]", …). So "BLUEGEMSTONE"
-// matches "BLUEGEMSTONE/ต่อ" and "Fern" matches "[OP]Fern", but "Eve" doesn't
-// match "Steve". Both arguments must already be normalizeName()'d.
+// name's start/end, any non-letter (space, "/", "|", "]", …) or a switch of writing
+// system. So "BLUEGEMSTONE" matches "BLUEGEMSTONE/ต่อ", "Fern" matches "[OP]Fern"
+// and "Dragon" matches "闇Dragon", but "Eve" doesn't match "Steve". Both arguments
+// must already be normalizeName()'d.
 export function nameContainsIgn(name, ign) {
   if (!ign) return false;
-  const isWordChar = (ch) => ch !== undefined && /[\p{L}\p{N}\p{M}]/u.test(ch);
+  const ignChars = [...ign];
   for (let i = name.indexOf(ign); i !== -1; i = name.indexOf(ign, i + 1)) {
     const before = [...name.slice(0, i)].at(-1);
     const after = [...name.slice(i + ign.length)][0];
-    if (!isWordChar(before) && !isWordChar(after)) return true;
+    if (!sameWord(before, ignChars[0]) && !sameWord(ignChars.at(-1), after)) return true;
   }
   return false;
 }
