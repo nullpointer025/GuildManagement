@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS players (
   total_contribution INTEGER,
   online_status TEXT,
   active INTEGER NOT NULL DEFAULT 1,
+  in_discord INTEGER NOT NULL DEFAULT 0,
   last_imported_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -185,6 +186,16 @@ function migrateAddNotesColumns() {
   }
 }
 
+// One-time migration adding the per-player "is in the guild Discord" flag, set by
+// hand from the roster or in bulk by the Discord sync.
+function migrateAddInDiscordColumn() {
+  const columns = db.prepare("PRAGMA table_info(players)").all();
+  if (!columns.some((c) => c.name === "in_discord")) {
+    db.exec("ALTER TABLE players ADD COLUMN in_discord INTEGER NOT NULL DEFAULT 0");
+  }
+}
+
 migrateAddBoardColumn();
 migrateRemoveAccountsAndSharedPartyCount();
 migrateAddNotesColumns();
+migrateAddInDiscordColumn();

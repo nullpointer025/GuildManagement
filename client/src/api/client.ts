@@ -1,4 +1,4 @@
-import type { ImportSummary, Player, RaidBoardKey, RaidDetail, RaidSummary } from "../types";
+import type { DiscordSyncSummary, ImportSummary, Player, RaidBoardKey, RaidDetail, RaidSummary } from "../types";
 
 const BASE = "/api";
 
@@ -39,6 +39,12 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ active: active ? 1 : 0 }),
     }),
+  setPlayerInDiscord: (id: number, inDiscord: boolean) =>
+    request<{ player: Player }>(`/players/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ in_discord: inDiscord ? 1 : 0 }),
+    }),
+  syncDiscord: () => request<{ summary: DiscordSyncSummary }>("/players/discord-sync", { method: "POST" }),
   importCsv: (file: File) => {
     const fd = new FormData();
     fd.append("file", file);

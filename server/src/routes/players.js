@@ -3,6 +3,7 @@ import multer from "multer";
 import { db, transaction } from "../db.js";
 import { requireAccess } from "../auth.js";
 import { parsePlayersCsv } from "../csvImport.js";
+import { DiscordError, discordConfigured, fetchGuildMembers, memberNames, normalizeName } from "../discord.js";
 
 export const playersRouter = Router();
 playersRouter.use(requireAccess);
@@ -23,13 +24,13 @@ playersRouter.patch("/:id", (req, res) => {
   const player = db.prepare("SELECT * FROM players WHERE id = ?").get(id);
   if (!player) return res.status(404).json({ error: "Player not found" });
 
-  const allowed = ["active", "title", "position"];
+  const allowed = ["active", "title", "position", "in_discord"];
   const updates = [];
   const values = [];
   for (const key of allowed) {
     if (key in (req.body ?? {})) {
       updates.push(`${key} = ?`);
-      values.push(req.body[key]);
+      values.push(key === "in_discord" ? (req.body[key] ? 1 : 0) : req.body[key]);
     }
   }
   if (updates.length === 0) {
@@ -118,4 +119,42 @@ playersRouter.post("/import", upload.single("file"), (req, res) => {
   res.json({
     summary: { added, updated, flaggedInactive: removed, activeTotal: total },
   });
+});
+
+// Re-checks every player against the guild Discord server's member list and sets
+// in_discord accordingly — overwriting any manual ticks with what Discord reports.
+playersRouter.post("/discord-sync", async (req, res, next) => {
+  if (!discordConfigured()) {
+    return res
+      .status(503)
+      .json({ error: "Discord isn't set up — add DISCORD_BOT_TOKEN and DISCORD_GUILD_ID to the server env" });
+  }
+
+  try {
+    const members = await fetchGuildMembers();
+
+    const discordNames = new Set();
+    for (const member of members) {
+      for (const name of memberNames(member)) discordNames.add(normalizeName(name));
+    }
+    discordNames.delete("");
+
+    const players = db.prepare("SELECT id, ign, active FROM players").all();
+    const setStmt = db.prepare("UPDATE players SET in_discord = ?, updated_at = datetime('now') WHERE id = ?");
+    let matched = 0;
+    let missing = 0;
+    transaction(() => {
+      for (const p of players) {
+        const inDiscord = discordNames.has(normalizeName(p.ign));
+        setStmt.run(inDiscord ? 1 : 0, p.id);
+        if (p.active === 1) inDiscord ? matched++ : missing++;
+      }
+    })();
+
+    res.json({ summary: { matched, missing, discordMembers: members.length } });
+  } catch (err) {
+    // Express 4 doesn't catch async handler errors on its own.
+    if (err instanceof DiscordError) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
 });

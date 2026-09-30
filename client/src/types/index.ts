@@ -12,6 +12,7 @@ export interface Player {
   total_contribution: number | null;
   online_status: string | null;
   active: number;
+  in_discord: number;
 }
 
 export interface RaidSummary {
@@ -34,6 +35,12 @@ export interface RaidDetail extends RaidSummary {
   boards: Record<RaidBoardKey, RaidBoard>;
   notes: string | null;
   notes_updated_at: string | null;
+}
+
+export interface DiscordSyncSummary {
+  matched: number;
+  missing: number;
+  discordMembers: number;
 }
 
 export interface ImportSummary {
