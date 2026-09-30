@@ -66,6 +66,21 @@ export function normalizeName(name) {
     .replace(/[^\p{L}\p{N}\p{M}]+$/u, "");
 }
 
+// True when the IGN appears in a Discord name as a whole word — set apart by the
+// name's start/end or any non-letter (space, "/", "|", "]", …). So "BLUEGEMSTONE"
+// matches "BLUEGEMSTONE/ต่อ" and "Fern" matches "[OP]Fern", but "Eve" doesn't
+// match "Steve". Both arguments must already be normalizeName()'d.
+export function nameContainsIgn(name, ign) {
+  if (!ign) return false;
+  const isWordChar = (ch) => ch !== undefined && /[\p{L}\p{N}\p{M}]/u.test(ch);
+  for (let i = name.indexOf(ign); i !== -1; i = name.indexOf(ign, i + 1)) {
+    const before = [...name.slice(0, i)].at(-1);
+    const after = [...name.slice(i + ign.length)][0];
+    if (!isWordChar(before) && !isWordChar(after)) return true;
+  }
+  return false;
+}
+
 // Every name a member could be matched by: server nickname first (what the guild
 // sets to the IGN), then display name and username for members without one.
 export function memberNames(member) {
