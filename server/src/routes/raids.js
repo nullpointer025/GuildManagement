@@ -75,6 +75,8 @@ function getRaidWithSlots(raidId) {
           total_contribution: row.total_contribution,
           online_status: row.online_status,
           active: row.active,
+          in_discord: row.in_discord,
+          ultimate: row.ultimate,
         }
       : null;
     if (board.parties[row.party_index]) {

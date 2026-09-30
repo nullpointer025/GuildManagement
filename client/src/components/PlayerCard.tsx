@@ -31,9 +31,17 @@ export function PlayerCard({ player, dragging, overlay, clickable, onRemove }: P
     >
       <div className="flex items-center justify-between gap-2">
         <span className="truncate text-base font-semibold text-heading">{player.ign}</span>
-        {player.level != null && (
-          <span className="shrink-0 text-sm text-ink-dim">Lv.{player.level}</span>
-        )}
+        <span className="flex shrink-0 items-center gap-1.5">
+          {player.ultimate === 1 && (
+            <span
+              className="rounded border border-gold/60 bg-gold/15 px-1.5 text-xs font-bold tracking-wide text-gold"
+              title="Has Ultimate"
+            >
+              ULT
+            </span>
+          )}
+          {player.level != null && <span className="text-sm text-ink-dim">Lv.{player.level}</span>}
+        </span>
       </div>
       <div className="mt-1.5 flex items-center justify-between gap-2">
         <span className="flex min-w-0 items-center gap-1.5 truncate text-sm text-ink-dim">
