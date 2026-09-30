@@ -37,7 +37,7 @@ export function Navbar() {
             onClick={handleLogout}
             className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim transition-colors hover:border-danger hover:text-danger"
           >
-            Lock
+            Logout
           </button>
         </div>
       </div>
