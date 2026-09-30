@@ -58,10 +58,13 @@ export async function fetchGuildMembers() {
 
 // Makes an IGN and a Discord name comparable: Unicode-normalized, case-insensitive,
 // and ignoring stray symbols around the name (e.g. a Discord nick of "`Eve").
+// "i" and "l" are treated as the same letter, since players swap a capital "I" for
+// a lowercase "l" (they look identical in most fonts): "SkuIlCracker" = "SkullCracker".
 export function normalizeName(name) {
   return (name ?? "")
     .normalize("NFKC")
     .toLowerCase()
+    .replace(/l/g, "i")
     .replace(/^[^\p{L}\p{N}]+/u, "")
     .replace(/[^\p{L}\p{N}\p{M}]+$/u, "");
 }
