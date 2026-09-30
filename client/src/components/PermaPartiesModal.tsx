@@ -309,7 +309,7 @@ export function PermaPartiesModal({ players, boards, defaultBoard, onApply, onCl
 
         {draft ? (
           <>
-            <div className="flex min-h-0 flex-col gap-3 p-4">
+            <div className="flex shrink-0 flex-col gap-3 p-4">
               <input
                 autoFocus
                 value={draft.name}
