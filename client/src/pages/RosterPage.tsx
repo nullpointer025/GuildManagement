@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api/client";
-import type { DiscordSyncSummary, ImportSummary, Player } from "../types";
+import type { DiscordSyncSummary, ImportSummary, Player, PlayerFlag } from "../types";
 import { CsvDropzone } from "../components/CsvDropzone";
 
 type SortKey = "gear_score" | "level" | "ign" | "total_contribution";
@@ -64,13 +64,13 @@ export function RosterPage() {
     await loadPlayers();
   }
 
-  async function toggleInDiscord(player: Player) {
-    const next = player.in_discord !== 1;
-    setPlayers((prev) => prev.map((p) => (p.id === player.id ? { ...p, in_discord: next ? 1 : 0 } : p)));
+  async function toggleFlag(player: Player, flag: PlayerFlag) {
+    const next = player[flag] !== 1;
+    setPlayers((prev) => prev.map((p) => (p.id === player.id ? { ...p, [flag]: next ? 1 : 0 } : p)));
     try {
-      await api.setPlayerInDiscord(player.id, next);
+      await api.setPlayerFlag(player.id, flag, next);
     } catch {
-      setPlayers((prev) => prev.map((p) => (p.id === player.id ? { ...p, in_discord: player.in_discord } : p)));
+      setPlayers((prev) => prev.map((p) => (p.id === player.id ? { ...p, [flag]: player[flag] } : p)));
     }
   }
 
@@ -184,7 +184,7 @@ export function RosterPage() {
       )}
 
       <div className="overflow-x-auto rounded-2xl border border-border">
-        <table className="w-full min-w-[900px] border-collapse text-base">
+        <table className="w-full min-w-[1000px] border-collapse text-base">
           <thead>
             <tr className="border-b border-border bg-panel-alt text-left text-sm uppercase tracking-wide text-ink-dim">
               <th className="px-5 py-4 font-medium">IGN</th>
@@ -196,19 +196,20 @@ export function RosterPage() {
               <th className="px-5 py-4 font-medium">Total Contribution</th>
               <th className="px-5 py-4 font-medium">Status</th>
               <th className="px-5 py-4 font-medium">Discord</th>
+              <th className="px-5 py-4 font-medium">Ultimate</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={9} className="px-5 py-10 text-center text-ink-dim">
+                <td colSpan={10} className="px-5 py-10 text-center text-ink-dim">
                   Loading roster…
                 </td>
               </tr>
             )}
             {!loading && filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-5 py-10 text-center text-ink-dim">
+                <td colSpan={10} className="px-5 py-10 text-center text-ink-dim">
                   No members found. Import a CSV export to get started.
                 </td>
               </tr>
@@ -247,8 +248,17 @@ export function RosterPage() {
                   <input
                     type="checkbox"
                     checked={p.in_discord === 1}
-                    onChange={() => toggleInDiscord(p)}
+                    onChange={() => toggleFlag(p, "in_discord")}
                     aria-label={`${p.ign} is in Discord`}
+                    className="h-4 w-4 accent-[#d9a441]"
+                  />
+                </td>
+                <td className="px-5 py-3.5">
+                  <input
+                    type="checkbox"
+                    checked={p.ultimate === 1}
+                    onChange={() => toggleFlag(p, "ultimate")}
+                    aria-label={`${p.ign} has Ultimate`}
                     className="h-4 w-4 accent-[#d9a441]"
                   />
                 </td>

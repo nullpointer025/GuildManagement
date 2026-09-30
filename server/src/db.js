@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS players (
   online_status TEXT,
   active INTEGER NOT NULL DEFAULT 1,
   in_discord INTEGER NOT NULL DEFAULT 0,
+  ultimate INTEGER NOT NULL DEFAULT 0,
   last_imported_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -195,7 +196,17 @@ function migrateAddInDiscordColumn() {
   }
 }
 
+// One-time migration adding the officer-set "Ultimate" flag. The CSV import never
+// touches it, so it survives re-imports.
+function migrateAddUltimateColumn() {
+  const columns = db.prepare("PRAGMA table_info(players)").all();
+  if (!columns.some((c) => c.name === "ultimate")) {
+    db.exec("ALTER TABLE players ADD COLUMN ultimate INTEGER NOT NULL DEFAULT 0");
+  }
+}
+
 migrateAddBoardColumn();
 migrateRemoveAccountsAndSharedPartyCount();
 migrateAddNotesColumns();
 migrateAddInDiscordColumn();
+migrateAddUltimateColumn();

@@ -24,13 +24,14 @@ playersRouter.patch("/:id", (req, res) => {
   const player = db.prepare("SELECT * FROM players WHERE id = ?").get(id);
   if (!player) return res.status(404).json({ error: "Player not found" });
 
-  const allowed = ["active", "title", "position", "in_discord"];
+  const allowed = ["active", "title", "position", "in_discord", "ultimate"];
+  const flags = ["in_discord", "ultimate"];
   const updates = [];
   const values = [];
   for (const key of allowed) {
     if (key in (req.body ?? {})) {
       updates.push(`${key} = ?`);
-      values.push(key === "in_discord" ? (req.body[key] ? 1 : 0) : req.body[key]);
+      values.push(flags.includes(key) ? (req.body[key] ? 1 : 0) : req.body[key]);
     }
   }
   if (updates.length === 0) {

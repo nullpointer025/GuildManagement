@@ -13,7 +13,11 @@ export interface Player {
   online_status: string | null;
   active: number;
   in_discord: number;
+  ultimate: number;
 }
+
+// Officer-editable yes/no fields on a player, shown as roster checkboxes.
+export type PlayerFlag = "in_discord" | "ultimate";
 
 export interface RaidSummary {
   id: number;
