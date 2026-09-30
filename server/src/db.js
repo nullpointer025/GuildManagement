@@ -89,6 +89,24 @@ CREATE TABLE IF NOT EXISTS raid_parties (
 );
 
 CREATE INDEX IF NOT EXISTS idx_raid_parties_raid ON raid_parties(raid_id);
+
+-- Reusable "perma parties": fixed groups of up to 5 players, shared by every raid
+-- and kept until deleted. UNIQUE(player_id) keeps a player in at most one of them,
+-- so applying several at once can never double-book anyone.
+CREATE TABLE IF NOT EXISTS perma_parties (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS perma_party_members (
+  perma_party_id INTEGER NOT NULL REFERENCES perma_parties(id) ON DELETE CASCADE,
+  slot_index INTEGER NOT NULL,
+  player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  PRIMARY KEY (perma_party_id, slot_index),
+  UNIQUE (player_id)
+);
 `);
 
 // One-time migration for databases created before boards existed at all: rebuild

@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { authRouter } from "./routes/auth.js";
 import { playersRouter } from "./routes/players.js";
 import { raidsRouter } from "./routes/raids.js";
+import { permaPartiesRouter } from "./routes/permaParties.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -25,6 +26,7 @@ if (process.env.NODE_ENV !== "production") {
 app.use("/api/auth", authRouter);
 app.use("/api/players", playersRouter);
 app.use("/api/raids", raidsRouter);
+app.use("/api/perma-parties", permaPartiesRouter);
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 

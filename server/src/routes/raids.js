@@ -254,6 +254,100 @@ raidsRouter.put("/:id/slots", (req, res) => {
   res.json({ raid: getRaidWithSlots(raidId) });
 });
 
+// Places perma parties into the parties the officer picked on one board, naming
+// each party after its perma party. The board's party count never changes. Anyone
+// already in a target party goes back to the pool; members placed elsewhere in this
+// raid (either board) are moved; members who have left the guild (inactive) are
+// skipped. A perma party already sitting together in its target party is left
+// alone, and a party emptied by the move loses its perma name.
+raidsRouter.post("/:id/apply-perma-parties", (req, res) => {
+  const raidId = Number(req.params.id);
+  const raid = db.prepare("SELECT * FROM raids WHERE id = ?").get(raidId);
+  if (!raid) return res.status(404).json({ error: "Raid not found" });
+
+  const { board, assignments } = req.body ?? {};
+  if (!isValidBoard(board)) return res.status(400).json({ error: "Invalid board" });
+  if (!Array.isArray(assignments) || assignments.length === 0) {
+    return res.status(400).json({ error: "Select at least one perma party" });
+  }
+  const partyCount = boardPartyCount(raidId, board);
+  const validAssignment = (a) =>
+    Number.isInteger(a?.permaPartyId) && Number.isInteger(a?.partyIndex) && a.partyIndex >= 0 && a.partyIndex < partyCount;
+  if (!assignments.every(validAssignment)) {
+    return res.status(400).json({ error: `Pick a party between 1 and ${partyCount}` });
+  }
+  if (new Set(assignments.map((a) => a.partyIndex)).size !== assignments.length) {
+    return res.status(400).json({ error: "Each perma party needs a different target party" });
+  }
+  if (new Set(assignments.map((a) => a.permaPartyId)).size !== assignments.length) {
+    return res.status(400).json({ error: "A perma party was selected twice" });
+  }
+
+  const findParty = db.prepare("SELECT id, name FROM perma_parties WHERE id = ?");
+  const membersOf = db.prepare(
+    `SELECT p.id, p.ign, p.active FROM perma_party_members m
+     JOIN players p ON p.id = m.player_id
+     WHERE m.perma_party_id = ? ORDER BY m.slot_index`
+  );
+  const slotOf = db.prepare("SELECT board, party_index FROM raid_slots WHERE raid_id = ? AND player_id = ?");
+
+  const skipped = [];
+  const alreadyPlaced = [];
+  const toPlace = [];
+  for (const { permaPartyId, partyIndex } of assignments) {
+    const party = findParty.get(permaPartyId);
+    if (!party) return res.status(400).json({ error: "Some perma parties no longer exist" });
+    const members = membersOf.all(party.id);
+    skipped.push(...members.filter((m) => m.active !== 1).map((m) => m.ign));
+    const active = members.filter((m) => m.active === 1);
+    const inTarget = active.every((m) => {
+      const at = slotOf.get(raidId, m.id);
+      return at && at.board === board && at.party_index === partyIndex;
+    });
+    if (active.length > 0 && inTarget) alreadyPlaced.push(party.name);
+    else toPlace.push({ ...party, partyIndex, members: active });
+  }
+
+  const clearParty = db.prepare(
+    "UPDATE raid_slots SET player_id = NULL WHERE raid_id = ? AND board = ? AND party_index = ?"
+  );
+  const clearPlayer = db.prepare("UPDATE raid_slots SET player_id = NULL WHERE raid_id = ? AND player_id = ?");
+  const setSlot = db.prepare(
+    "UPDATE raid_slots SET player_id = ? WHERE raid_id = ? AND board = ? AND party_index = ? AND slot_index = ?"
+  );
+  const nameParty = db.prepare(
+    `INSERT INTO raid_parties (raid_id, board, party_index, name) VALUES (?, ?, ?, ?)
+     ON CONFLICT(raid_id, board, party_index) DO UPDATE SET name = excluded.name`
+  );
+  const isEmpty = db.prepare(
+    "SELECT COUNT(player_id) = 0 AS empty FROM raid_slots WHERE raid_id = ? AND board = ? AND party_index = ?"
+  );
+  const clearStaleName = db.prepare(
+    "UPDATE raid_parties SET name = NULL WHERE raid_id = ? AND board = ? AND party_index = ? AND name = ?"
+  );
+
+  transaction(() => {
+    // Empty every target first, so one perma party's target can't swallow another's members.
+    for (const party of toPlace) clearParty.run(raidId, board, party.partyIndex);
+    const vacated = [];
+    for (const party of toPlace) {
+      party.members.forEach((member, slot) => {
+        const from = slotOf.get(raidId, member.id);
+        if (from) vacated.push({ ...from, name: party.name });
+        clearPlayer.run(raidId, member.id);
+        setSlot.run(member.id, raidId, board, party.partyIndex, slot);
+      });
+      nameParty.run(raidId, board, party.partyIndex, party.name);
+    }
+    for (const v of vacated) {
+      if (isEmpty.get(raidId, v.board, v.party_index).empty) clearStaleName.run(raidId, v.board, v.party_index, v.name);
+    }
+    db.prepare("UPDATE raids SET updated_at = datetime('now') WHERE id = ?").run(raidId);
+  })();
+
+  res.json({ raid: getRaidWithSlots(raidId), skipped, alreadyPlaced });
+});
+
 // Set (or clear, with an empty/omitted name) a party's custom display name on one board.
 raidsRouter.patch("/:id/parties/:partyIndex", (req, res) => {
   const raidId = Number(req.params.id);

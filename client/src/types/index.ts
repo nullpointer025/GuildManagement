@@ -41,6 +41,25 @@ export interface RaidDetail extends RaidSummary {
   notes_updated_at: string | null;
 }
 
+// A saved group of up to 5 players that can be dropped into any raid's parties.
+export interface PermaParty {
+  id: number;
+  name: string;
+  members: Player[];
+}
+
+// Which party (0-based) on the chosen board a perma party should fill.
+export interface PermaPartyAssignment {
+  permaPartyId: number;
+  partyIndex: number;
+}
+
+export interface ApplyPermaPartiesResult {
+  raid: RaidDetail;
+  skipped: string[];
+  alreadyPlaced: string[];
+}
+
 export interface DiscordSyncSummary {
   matched: number;
   missing: number;

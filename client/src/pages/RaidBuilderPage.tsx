@@ -10,7 +10,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { api } from "../api/client";
-import type { Player, RaidBoardKey, RaidDetail } from "../types";
+import type { PermaPartyAssignment, Player, RaidBoardKey, RaidDetail } from "../types";
 import type { DragOrigin } from "../components/DraggablePlayer";
 import { PoolPanel } from "../components/PoolPanel";
 import { Party } from "../components/Party";
@@ -18,6 +18,7 @@ import { ExportParty } from "../components/ExportParty";
 import { PlayerCard } from "../components/PlayerCard";
 import { PlayerPickerModal } from "../components/PlayerPickerModal";
 import { NotesModal } from "../components/NotesModal";
+import { PermaPartiesModal } from "../components/PermaPartiesModal";
 
 type SortKey = "gear_score" | "level" | "ign" | "class";
 
@@ -44,6 +45,7 @@ export function RaidBuilderPage() {
   const [notesOpen, setNotesOpen] = useState(false);
   const [savingNotes, setSavingNotes] = useState(false);
   const [notesUnseen, setNotesUnseen] = useState(false);
+  const [permaOpen, setPermaOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
   const notesSeenKey = `guild-notes-seen-${raidId}`;
 
@@ -251,6 +253,13 @@ export function RaidBuilderPage() {
     }
   }
 
+  async function handleApplyPermaParties(target: RaidBoardKey, assignments: PermaPartyAssignment[]) {
+    const result = await api.applyPermaParties(raidId, target, assignments);
+    setRaid(result.raid);
+    setActiveBoard(target);
+    return result;
+  }
+
   async function handleDeleteRaid() {
     if (!confirm("Delete this raid team? This cannot be undone.")) return;
     await api.deleteRaid(raidId);
@@ -407,6 +416,12 @@ export function RaidBuilderPage() {
               />
             </div>
             <button
+              onClick={() => setPermaOpen(true)}
+              className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold"
+            >
+              Perma parties
+            </button>
+            <button
               onClick={handleOpenNotes}
               className="relative rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold"
             >
@@ -498,6 +513,16 @@ export function RaidBuilderPage() {
           players={pool}
           onSelect={handlePickPlayer}
           onClose={() => setPickerTarget(null)}
+        />
+      )}
+
+      {permaOpen && (
+        <PermaPartiesModal
+          players={players}
+          boards={raid.boards}
+          defaultBoard={activeBoard}
+          onApply={handleApplyPermaParties}
+          onClose={() => setPermaOpen(false)}
         />
       )}
 

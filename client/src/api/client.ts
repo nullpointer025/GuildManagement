@@ -1,4 +1,15 @@
-import type { DiscordSyncSummary, ImportSummary, Player, PlayerFlag, RaidBoardKey, RaidDetail, RaidSummary } from "../types";
+import type {
+  ApplyPermaPartiesResult,
+  DiscordSyncSummary,
+  ImportSummary,
+  PermaParty,
+  PermaPartyAssignment,
+  Player,
+  PlayerFlag,
+  RaidBoardKey,
+  RaidDetail,
+  RaidSummary,
+} from "../types";
 
 const BASE = "/api";
 
@@ -72,6 +83,21 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ board, name }),
     }),
+  applyPermaParties: (id: number, board: RaidBoardKey, assignments: PermaPartyAssignment[]) =>
+    request<ApplyPermaPartiesResult>(`/raids/${id}/apply-perma-parties`, {
+      method: "POST",
+      body: JSON.stringify({ board, assignments }),
+    }),
+
+  permaParties: () => request<{ permaParties: PermaParty[] }>("/perma-parties"),
+  savePermaParty: (id: number | null, payload: { name: string; playerIds: number[] }) =>
+    request<{ permaParties: PermaParty[] }>(id == null ? "/perma-parties" : `/perma-parties/${id}`, {
+      method: id == null ? "POST" : "PUT",
+      body: JSON.stringify(payload),
+    }),
+  deletePermaParty: (id: number) =>
+    request<{ permaParties: PermaParty[] }>(`/perma-parties/${id}`, { method: "DELETE" }),
+
   updateNotes: (id: number, notes: string) =>
     request<{ raid: RaidDetail }>(`/raids/${id}/notes`, {
       method: "PATCH",
