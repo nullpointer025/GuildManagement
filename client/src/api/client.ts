@@ -109,6 +109,11 @@ export const api = {
   leagueTracker: () => request<{ leagueCount: number; players: TrackerPlayer[] }>("/leagues/tracker"),
   previewLeague: (csv: string) =>
     request<{ rows: LeaguePreviewRow[] }>("/leagues/preview", { method: "POST", body: JSON.stringify({ csv }) }),
+  previewLeagueImages: (images: File[]) => {
+    const fd = new FormData();
+    for (const image of images) fd.append("images", image);
+    return request<{ rows: LeaguePreviewRow[] }>("/leagues/preview-images", { method: "POST", body: fd });
+  },
   saveLeague: (payload: {
     date: string;
     result: LeagueResult | null;

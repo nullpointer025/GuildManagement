@@ -30,10 +30,7 @@ export function parseStat(value) {
   return Math.round(Number(match[1]) * (MULTIPLIERS[match[2]] ?? 1));
 }
 
-// Parses a battle-record CSV (any number of rows) into
-// { ign, kills, assists, player_damage, building_damage, error }.
-// Exact duplicate rows (e.g. from overlapping screenshots) are dropped; a repeated
-// name with different numbers is kept but flagged for the officer to resolve.
+// Parses a battle-record CSV (any number of rows) into rows from parseLeagueRows.
 export function parseLeagueCsv(text) {
   const rows = parseCsv(String(text ?? "").replace(/^\uFEFF/, ""));
   if (rows.length === 0) throw new Error("The CSV is empty");
@@ -49,13 +46,31 @@ export function parseLeagueCsv(text) {
     throw new Error("The CSV header must be: Player,Kill,Assist,Player Damage,Building Damage");
   }
 
+  const rawRows = rows.slice(1).map((r) => ({
+    ign: r[idx.ign],
+    kills: r[idx.kills],
+    assists: r[idx.assists],
+    player_damage: r[idx.player_damage],
+    building_damage: r[idx.building_damage],
+  }));
+  const result = parseLeagueRows(rawRows);
+  if (result.length === 0) throw new Error("No player rows found in the CSV");
+  return result;
+}
+
+// Turns raw rows ({ ign, kills, assists, player_damage, building_damage } as text)
+// from the CSV or from screenshots into
+// { ign, kills, assists, player_damage, building_damage, error }.
+// Exact duplicate rows (e.g. from overlapping screenshots) are dropped; a repeated
+// name with different numbers is kept but flagged for the officer to resolve.
+export function parseLeagueRows(rawRows) {
   const result = [];
   const seen = new Map();
-  for (const r of rows.slice(1)) {
-    const ign = (r[idx.ign] ?? "").trim();
+  for (const r of rawRows) {
+    const ign = String(r.ign ?? "").trim();
     if (!ign) continue;
     const row = { ign, error: null };
-    for (const f of STAT_FIELDS) row[f] = parseStat(r[idx[f]]);
+    for (const f of STAT_FIELDS) row[f] = parseStat(r[f]);
     if (STAT_FIELDS.some((f) => row[f] == null)) row.error = "Couldn't read one of the numbers";
 
     const key = normalizeName(ign);
@@ -68,6 +83,5 @@ export function parseLeagueCsv(text) {
     }
     result.push(row);
   }
-  if (result.length === 0) throw new Error("No player rows found in the CSV");
   return result;
 }

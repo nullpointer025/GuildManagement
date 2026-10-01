@@ -23,6 +23,7 @@ Rules:
 - Keep numbers as shown (e.g. 12.3M, 790.0M).`;
 
 type Step = "input" | "review";
+type Source = "screenshots" | "csv";
 
 interface ReviewRow {
   ign: string;
@@ -61,6 +62,9 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
   const [participants, setParticipants] = useState("");
   const [totalKills, setTotalKills] = useState("");
   const [towers, setTowers] = useState("");
+  const [source, setSource] = useState<Source>("screenshots");
+  const [images, setImages] = useState<File[]>([]);
+  const [fromOcr, setFromOcr] = useState(false);
   const [csv, setCsv] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
   const [rows, setRows] = useState<ReviewRow[]>([]);
@@ -80,6 +84,11 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
     () => [...players].sort((a, b) => b.active - a.active || a.ign.localeCompare(b.ign)),
     [players]
   );
+
+  function addImages(files: File[]) {
+    setImages((prev) => [...prev, ...files.filter((f) => f.type.startsWith("image/"))]);
+    setError(null);
+  }
 
   async function handleFile(file: File) {
     setCsv(await file.text());
@@ -101,11 +110,14 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
     setBusy(true);
     setError(null);
     try {
-      const { rows } = await api.previewLeague(csv);
+      const { rows } = source === "screenshots" ? await api.previewLeagueImages(images) : await api.previewLeague(csv);
       setRows(rows.map(toReviewRow));
+      setFromOcr(source === "screenshots");
       setStep("review");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't read the CSV");
+      setError(
+        err instanceof ApiError ? err.message : source === "screenshots" ? "Couldn't read the screenshots" : "Couldn't read the CSV"
+      );
     } finally {
       setBusy(false);
     }
@@ -164,7 +176,7 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
             </h2>
             <p className="text-xs text-ink-dim">
               {step === "input"
-                ? "Step 1 of 2 — league details and the battle-record CSV"
+                ? "Step 1 of 2 — league details and the battle record"
                 : "Step 2 of 2 — check each row's roster player, then save"}
             </p>
           </div>
@@ -211,44 +223,110 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
               </label>
             </div>
 
-            <div className="rounded-xl border border-border-soft bg-panel-alt p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-heading">Turn screenshots into the CSV with Claude</p>
-                  <p className="text-sm text-ink-dim">
-                    Open claude.ai, attach all battle-record screenshots for this league, paste this prompt, and save the
-                    reply as a .csv (or paste it below).
-                  </p>
-                </div>
+            <div className="flex gap-1 self-start rounded-lg border border-border p-1">
+              {(
+                [
+                  ["screenshots", "Upload screenshots"],
+                  ["csv", "Paste CSV"],
+                ] as const
+              ).map(([value, text]) => (
                 <button
+                  key={value}
                   type="button"
-                  onClick={copyPrompt}
-                  className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-sm text-ink hover:border-gold hover:text-gold"
+                  onClick={() => {
+                    setSource(value);
+                    setError(null);
+                  }}
+                  className={[
+                    "rounded-md px-3 py-1.5 text-sm",
+                    source === value ? "bg-gold text-bg font-semibold" : "text-ink-dim hover:text-ink",
+                  ].join(" ")}
                 >
-                  {copied ? "Copied!" : "Copy prompt"}
+                  {text}
                 </button>
-              </div>
+              ))}
             </div>
 
-            <CsvDropzone
-              onFile={handleFile}
-              busy={false}
-              compact
-              label={fileName ? `Loaded ${fileName} — drop another to replace` : "Drag & drop the battle-record CSV here"}
-            />
-            <label className="flex flex-col gap-1">
-              <span className="text-xs uppercase tracking-wide text-ink-dim">…or paste the CSV</span>
-              <textarea
-                value={csv}
-                onChange={(e) => {
-                  setCsv(e.target.value);
-                  setFileName(null);
-                }}
-                rows={6}
-                placeholder={"Player,Kill,Assist,Player Damage,Building Damage"}
-                className="w-full resize-y rounded-lg border border-border bg-panel-alt px-3 py-2 font-mono text-sm text-ink outline-none focus:border-gold"
+            {source === "screenshots" ? (
+              <div className="flex flex-col gap-3">
+                <p className="text-sm text-ink-dim">
+                  Add every battle-record screenshot for this league, scrolled from top to bottom. They're read with
+                  text recognition, so check the names and numbers on the next step.
+                </p>
+                <CsvDropzone
+                  onFiles={addImages}
+                  busy={busy}
+                  compact
+                  multiple
+                  accept="image/png,image/jpeg,image/webp"
+                  icon="🖼️"
+                  label={images.length > 0 ? "Drop more screenshots to add them" : "Drag & drop the battle-record screenshots here"}
+                />
+                {images.length > 0 && (
+                  <ul className="flex flex-col gap-1">
+                    {images.map((img, i) => (
+                      <li
+                        key={i}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-border-soft bg-panel-alt px-3 py-1.5 text-sm"
+                      >
+                        <span className="truncate text-ink">
+                          {i + 1}. {img.name}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}
+                          className="shrink-0 text-ink-dim hover:text-danger"
+                          aria-label={`Remove ${img.name}`}
+                        >
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : (
+              <>
+              <div className="rounded-xl border border-border-soft bg-panel-alt p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-heading">Turn screenshots into the CSV with Claude</p>
+                    <p className="text-sm text-ink-dim">
+                      Open claude.ai, attach all battle-record screenshots for this league, paste this prompt, and save the
+                      reply as a .csv (or paste it below).
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={copyPrompt}
+                    className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-sm text-ink hover:border-gold hover:text-gold"
+                  >
+                    {copied ? "Copied!" : "Copy prompt"}
+                  </button>
+                </div>
+              </div>
+
+              <CsvDropzone
+                onFiles={(files) => handleFile(files[0])}
+                busy={false}
+                compact
+                label={fileName ? `Loaded ${fileName} — drop another to replace` : "Drag & drop the battle-record CSV here"}
               />
-            </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs uppercase tracking-wide text-ink-dim">…or paste the CSV</span>
+                <textarea
+                  value={csv}
+                  onChange={(e) => {
+                    setCsv(e.target.value);
+                    setFileName(null);
+                  }}
+                  rows={6}
+                  placeholder={"Player,Kill,Assist,Player Damage,Building Damage"}
+                  className="w-full resize-y rounded-lg border border-border bg-panel-alt px-3 py-2 font-mono text-sm text-ink outline-none focus:border-gold"
+                />
+              </label>
+              </>
+            )}
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
@@ -256,6 +334,7 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
               {rows.length} rows · <span className="text-success">{rows.filter((r) => r.autoMatched).length} matched automatically</span>
               {unpicked > 0 && <span className="text-danger"> · {unpicked} need a roster player</span>}
               {rows.length - kept.length > 0 && <span> · {rows.length - kept.length} ignored</span>}
+              {fromOcr && <span> · read from screenshots, so compare the numbers before saving</span>}
             </p>
             <div className="min-h-0 flex-1 overflow-auto p-4">
               <table className="w-full min-w-[760px] border-collapse text-sm">
@@ -343,10 +422,10 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
             <button
               type="button"
               onClick={preview}
-              disabled={busy || !csv.trim()}
+              disabled={busy || (source === "screenshots" ? images.length === 0 : !csv.trim())}
               className="rounded-lg bg-gold px-4 py-2 text-base font-semibold text-bg transition-colors hover:bg-gold-bright disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {busy ? "Reading…" : "Review →"}
+              {busy ? (source === "screenshots" ? "Reading screenshots…" : "Reading…") : "Review →"}
             </button>
           ) : (
             <button

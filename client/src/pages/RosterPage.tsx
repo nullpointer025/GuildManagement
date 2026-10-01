@@ -147,7 +147,7 @@ export function RosterPage() {
       </div>
 
       <div className="rounded-2xl border border-border bg-panel p-6">
-        <CsvDropzone onFile={handleFile} busy={importing} />
+        <CsvDropzone onFiles={(files) => handleFile(files[0])} busy={importing} />
         {importError && <p className="mt-4 text-base text-danger">{importError}</p>}
         {summary && !importError && (
           <p className="mt-4 text-base text-ink-dim">

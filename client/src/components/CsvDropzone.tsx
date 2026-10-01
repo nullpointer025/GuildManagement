@@ -1,17 +1,23 @@
 import { useRef, useState, type DragEvent } from "react";
 
 interface CsvDropzoneProps {
-  onFile: (file: File) => void;
+  onFiles: (files: File[]) => void;
   busy: boolean;
   label?: string;
   compact?: boolean;
+  accept?: string;
+  multiple?: boolean;
+  icon?: string;
 }
 
 export function CsvDropzone({
-  onFile,
+  onFiles,
   busy,
   label = "Drag & drop the guild CSV export here",
   compact = false,
+  accept = ".csv,text/csv",
+  multiple = false,
+  icon = "📄",
 }: CsvDropzoneProps) {
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -19,8 +25,8 @@ export function CsvDropzone({
   function handleDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
     setDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) onFile(file);
+    const files = Array.from(e.dataTransfer.files ?? []);
+    if (files.length > 0) onFiles(multiple ? files : files.slice(0, 1));
   }
 
   return (
@@ -40,20 +46,21 @@ export function CsvDropzone({
       ].join(" ")}
     >
       <span className="text-4xl" aria-hidden>
-        📄
+        {icon}
       </span>
       <p className="text-lg font-medium text-ink">
         {busy ? "Importing…" : label}
       </p>
-      <p className="text-sm text-ink-dim">or click to browse for a file</p>
+      <p className="text-sm text-ink-dim">or click to browse for {multiple ? "files" : "a file"}</p>
       <input
         ref={inputRef}
         type="file"
-        accept=".csv,text/csv"
+        accept={accept}
+        multiple={multiple}
         className="hidden"
         onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) onFile(file);
+          const files = Array.from(e.target.files ?? []);
+          if (files.length > 0) onFiles(files);
           e.target.value = "";
         }}
       />

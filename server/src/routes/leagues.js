@@ -1,13 +1,17 @@
 import { Router } from "express";
+import multer from "multer";
 import { db, transaction } from "../db.js";
 import { requireAccess } from "../auth.js";
-import { parseLeagueCsv, parseStat } from "../leagueImport.js";
+import { parseLeagueCsv, parseLeagueRows, parseStat } from "../leagueImport.js";
+import { readBattleRecordImages } from "../leagueOcr.js";
 import { createRosterMatcher } from "../nameMatch.js";
 
 export const leaguesRouter = Router();
 leaguesRouter.use(requireAccess);
 
 const RESULTS = ["victory", "defeat"];
+const MAX_SCREENSHOTS = 20;
+const upload = multer({ limits: { fileSize: 10 * 1024 * 1024, files: MAX_SCREENSHOTS } });
 
 function optionalCount(value) {
   if (value == null || value === "") return { ok: true, value: null };
@@ -15,8 +19,22 @@ function optionalCount(value) {
   return Number.isInteger(n) && n >= 0 ? { ok: true, value: n } : { ok: false };
 }
 
-// Parses a pasted/uploaded battle-record CSV and suggests the roster player for
-// each row. Nothing is saved — the officer reviews and corrects it first.
+// Suggests the roster player for each parsed row. Nothing is saved — the officer
+// reviews and corrects the rows first.
+function previewRows(rows) {
+  const matchPlayer = createRosterMatcher(db.prepare("SELECT id, ign, active FROM players").all());
+  return rows.map((r) => ({
+    ign: r.ign,
+    kills: r.kills,
+    assists: r.assists,
+    playerDamage: r.player_damage,
+    buildingDamage: r.building_damage,
+    playerId: matchPlayer(r.ign),
+    error: r.error,
+  }));
+}
+
+// Parses a pasted/uploaded battle-record CSV.
 leaguesRouter.post("/preview", (req, res) => {
   let rows;
   try {
@@ -24,17 +42,32 @@ leaguesRouter.post("/preview", (req, res) => {
   } catch (err) {
     return res.status(400).json({ error: err.message || "Couldn't read the CSV" });
   }
-  const matchPlayer = createRosterMatcher(db.prepare("SELECT id, ign, active FROM players").all());
-  res.json({
-    rows: rows.map((r) => ({
-      ign: r.ign,
-      kills: r.kills,
-      assists: r.assists,
-      playerDamage: r.player_damage,
-      buildingDamage: r.building_damage,
-      playerId: matchPlayer(r.ign),
-      error: r.error,
-    })),
+  res.json({ rows: previewRows(rows) });
+});
+
+// Reads the battle-record screenshots with OCR, in upload order.
+leaguesRouter.post("/preview-images", (req, res, next) => {
+  upload.array("images", MAX_SCREENSHOTS)(req, res, async (err) => {
+    if (err) {
+      const tooMany = err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE";
+      return res.status(400).json({
+        error: tooMany ? `Upload at most ${MAX_SCREENSHOTS} screenshots` : err.code === "LIMIT_FILE_SIZE" ? "Each screenshot must be under 10 MB" : "Couldn't upload the screenshots",
+      });
+    }
+    const files = req.files ?? [];
+    if (files.length === 0) return res.status(400).json({ error: "Add at least one screenshot" });
+    if (files.some((f) => !/^image\/(png|jpeg|webp)$/.test(f.mimetype))) {
+      return res.status(400).json({ error: "Screenshots must be PNG, JPG or WebP images" });
+    }
+    try {
+      const rows = parseLeagueRows(await readBattleRecordImages(files.map((f) => f.buffer)));
+      if (rows.length === 0) {
+        return res.status(400).json({ error: "No player rows found in the screenshots — try sharper, uncropped screenshots or use the CSV instead" });
+      }
+      res.json({ rows: previewRows(rows) });
+    } catch (e) {
+      next(e);
+    }
   });
 });
 
