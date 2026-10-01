@@ -107,6 +107,30 @@ CREATE TABLE IF NOT EXISTS perma_party_members (
   PRIMARY KEY (perma_party_id, slot_index),
   UNIQUE (player_id)
 );
+
+-- One row per guild league fought, with the guild totals from the battle record.
+CREATE TABLE IF NOT EXISTS guild_leagues (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT NOT NULL,
+  result TEXT,
+  participants INTEGER,
+  total_kills INTEGER,
+  towers INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Each roster player's battle-record line for a league. A player with no row for
+-- a league didn't attend it. "ign" keeps the name exactly as the screenshot showed.
+CREATE TABLE IF NOT EXISTS guild_league_stats (
+  league_id INTEGER NOT NULL REFERENCES guild_leagues(id) ON DELETE CASCADE,
+  player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  ign TEXT NOT NULL,
+  kills INTEGER NOT NULL,
+  assists INTEGER NOT NULL,
+  player_damage INTEGER NOT NULL,
+  building_damage INTEGER NOT NULL,
+  PRIMARY KEY (league_id, player_id)
+);
 `);
 
 // One-time migration for databases created before boards existed at all: rebuild

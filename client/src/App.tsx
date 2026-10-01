@@ -6,6 +6,7 @@ import { GatePage } from "./pages/GatePage";
 import { RosterPage } from "./pages/RosterPage";
 import { RaidsListPage } from "./pages/RaidsListPage";
 import { RaidBuilderPage } from "./pages/RaidBuilderPage";
+import { GuildLeaguePage } from "./pages/GuildLeaguePage";
 
 export default function App() {
   const init = useAuthStore((s) => s.init);
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="/roster" element={<RosterPage />} />
         <Route path="/raids" element={<RaidsListPage />} />
         <Route path="/raids/:id" element={<RaidBuilderPage />} />
+        <Route path="/league" element={<GuildLeaguePage />} />
       </Route>
       <Route path="/" element={<Navigate to="/roster" replace />} />
       <Route path="*" element={<Navigate to="/roster" replace />} />

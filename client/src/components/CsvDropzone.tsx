@@ -3,9 +3,16 @@ import { useRef, useState, type DragEvent } from "react";
 interface CsvDropzoneProps {
   onFile: (file: File) => void;
   busy: boolean;
+  label?: string;
+  compact?: boolean;
 }
 
-export function CsvDropzone({ onFile, busy }: CsvDropzoneProps) {
+export function CsvDropzone({
+  onFile,
+  busy,
+  label = "Drag & drop the guild CSV export here",
+  compact = false,
+}: CsvDropzoneProps) {
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -26,7 +33,8 @@ export function CsvDropzone({ onFile, busy }: CsvDropzoneProps) {
       onDrop={handleDrop}
       onClick={() => !busy && inputRef.current?.click()}
       className={[
-        "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-12 text-center transition-colors",
+        "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 text-center transition-colors",
+        compact ? "py-6" : "py-12",
         dragOver ? "border-gold bg-gold/10" : "border-border hover:border-gold/50",
         busy ? "pointer-events-none opacity-60" : "",
       ].join(" ")}
@@ -35,7 +43,7 @@ export function CsvDropzone({ onFile, busy }: CsvDropzoneProps) {
         📄
       </span>
       <p className="text-lg font-medium text-ink">
-        {busy ? "Importing…" : "Drag & drop the guild CSV export here"}
+        {busy ? "Importing…" : label}
       </p>
       <p className="text-sm text-ink-dim">or click to browse for a file</p>
       <input

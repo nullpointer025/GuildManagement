@@ -41,6 +41,65 @@ export interface RaidDetail extends RaidSummary {
   notes_updated_at: string | null;
 }
 
+export type LeagueResult = "victory" | "defeat";
+
+export interface League {
+  id: number;
+  date: string;
+  result: LeagueResult | null;
+  participants: number | null;
+  total_kills: number | null;
+  towers: number | null;
+  recorded: number;
+}
+
+export interface LeagueStatLine {
+  kills: number;
+  assists: number;
+  playerDamage: number;
+  buildingDamage: number;
+}
+
+export interface LeaguePlayerStat extends LeagueStatLine {
+  playerId: number;
+  rosterIgn: string;
+  class: string | null;
+  ign: string;
+}
+
+export interface LeagueDetail extends Omit<League, "recorded"> {
+  stats: LeaguePlayerStat[];
+}
+
+// One battle-record row read from the CSV, with the roster player it was matched to.
+export interface LeaguePreviewRow extends LeagueStatLine {
+  ign: string;
+  playerId: number | null;
+  error: string | null;
+}
+
+export interface LeagueSaveRow {
+  playerId: number;
+  ign: string;
+  kills: string;
+  assists: string;
+  playerDamage: string;
+  buildingDamage: string;
+}
+
+export interface TrackerPlayer {
+  id: number;
+  ign: string;
+  class: string | null;
+  active: number;
+  attended: number;
+  missedLatest: boolean;
+  lastAttended: string | null;
+  totals: LeagueStatLine;
+  averages: { [K in keyof LeagueStatLine]: number | null };
+  history: (LeagueStatLine & { leagueId: number; date: string; ign: string })[];
+}
+
 // A saved group of up to 5 players that can be dropped into any raid's parties.
 export interface PermaParty {
   id: number;

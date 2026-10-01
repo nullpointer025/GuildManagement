@@ -30,6 +30,9 @@ export function Navbar() {
             <NavLink to="/raids" className={linkClass}>
               Raid Teams
             </NavLink>
+            <NavLink to="/league" className={linkClass}>
+              Guild League
+            </NavLink>
           </nav>
         </div>
         <div className="flex items-center gap-4">

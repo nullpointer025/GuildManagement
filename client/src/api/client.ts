@@ -2,6 +2,11 @@ import type {
   ApplyPermaPartiesResult,
   DiscordSyncSummary,
   ImportSummary,
+  League,
+  LeagueDetail,
+  LeaguePreviewRow,
+  LeagueResult,
+  LeagueSaveRow,
   PermaParty,
   PermaPartyAssignment,
   Player,
@@ -9,6 +14,7 @@ import type {
   RaidBoardKey,
   RaidDetail,
   RaidSummary,
+  TrackerPlayer,
 } from "../types";
 
 const BASE = "/api";
@@ -97,6 +103,21 @@ export const api = {
     }),
   deletePermaParty: (id: number) =>
     request<{ permaParties: PermaParty[] }>(`/perma-parties/${id}`, { method: "DELETE" }),
+
+  leagues: () => request<{ leagues: League[] }>("/leagues"),
+  league: (id: number) => request<{ league: LeagueDetail }>(`/leagues/${id}`),
+  leagueTracker: () => request<{ leagueCount: number; players: TrackerPlayer[] }>("/leagues/tracker"),
+  previewLeague: (csv: string) =>
+    request<{ rows: LeaguePreviewRow[] }>("/leagues/preview", { method: "POST", body: JSON.stringify({ csv }) }),
+  saveLeague: (payload: {
+    date: string;
+    result: LeagueResult | null;
+    participants: string;
+    totalKills: string;
+    towers: string;
+    rows: LeagueSaveRow[];
+  }) => request<{ id: number }>("/leagues", { method: "POST", body: JSON.stringify(payload) }),
+  deleteLeague: (id: number) => request<{ ok: true }>(`/leagues/${id}`, { method: "DELETE" }),
 
   updateNotes: (id: number, notes: string) =>
     request<{ raid: RaidDetail }>(`/raids/${id}/notes`, {
