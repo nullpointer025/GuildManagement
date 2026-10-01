@@ -80,9 +80,30 @@ export function compactName(name) {
   return name.replace(/[^\p{L}\p{N}\p{M}]/gu, "");
 }
 
+// True when a screenshot name is a roster name part (4+ characters) with at most
+// two stray characters in front — OCR often reads a "メ" or "鬼" prefix as "X",
+// "A" or "XA", so "XPulgas" is "メPulgas". Both arguments compactName()'d.
+function endsWithPart(name, part) {
+  return [...part].length >= 4 && name.endsWith(part) && [...name].length - [...part].length <= 2;
+}
+
+// True when two names of 6+ characters differ by one inserted, missing or changed
+// character — one misread letter, e.g. "[OP]JARAYKOMONK" for "[OP]ARAYKOMONK".
+// Both arguments compactName()'d.
+function oneEditApart(a, b) {
+  const x = [...a];
+  const y = [...b];
+  if (Math.min(x.length, y.length) < 6 || Math.abs(x.length - y.length) > 1 || a === b) return false;
+  let i = 0;
+  while (i < x.length && i < y.length && x[i] === y[i]) i++;
+  const rest = (n, m) => x.slice(i + n).join("") === y.slice(i + m).join("");
+  return rest(1, 1) || rest(1, 0) || rest(0, 1);
+}
+
 // Finds which roster player a name from a battle-record screenshot belongs to.
 // Tries, in order of confidence: the same name, the same name ignoring spaces and
-// symbols, then one name found as a whole word inside the other. Players still in
+// symbols, then one name found as a whole word inside the other (or at the end of
+// it after a misread prefix), then one misread letter. Players still in
 // the guild win ties with ones who left; any other tie returns null so an officer
 // picks by hand rather than the importer guessing.
 export function createRosterMatcher(players) {
@@ -99,10 +120,15 @@ export function createRosterMatcher(players) {
       let score = 0;
       if (p.name === name) score = 3;
       else if (p.compact && p.compact === compact) score = 2;
-      else if (p.variants.some((v) => nameContainsIgn(name, v)) || variants.some((v) => nameContainsIgn(p.name, v))) {
+      else if (
+        p.variants.some((v) => nameContainsIgn(name, v) || endsWithPart(compact, compactName(v))) ||
+        variants.some((v) => nameContainsIgn(p.name, v))
+      ) {
         score = 1;
+      } else if (oneEditApart(p.compact, compact)) {
+        score = 0.5;
       }
-      return { id: p.id, score: score === 0 ? 0 : score * 2 + (p.active ? 1 : 0) };
+      return { id: p.id, score: score === 0 ? 0 : score * 4 + (p.active ? 1 : 0) };
     });
     const best = Math.max(0, ...scored.map((s) => s.score));
     if (best === 0) return null;
