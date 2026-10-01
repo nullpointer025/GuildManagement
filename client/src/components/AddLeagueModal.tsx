@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api/client";
 import type { LeaguePreviewRow, LeagueResult, Player } from "../types";
 import { CsvDropzone } from "./CsvDropzone";
+import { RosterPlayerSelect } from "./RosterPlayerSelect";
 import { formatStat, todayIso } from "../lib/format";
 
 interface AddLeagueModalProps {
@@ -359,23 +360,15 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
                           {r.error && <p className="text-xs text-danger">{r.error}</p>}
                         </td>
                         <td className="px-2 py-1.5">
-                          <select
+                          <RosterPlayerSelect
                             value={r.pick}
-                            onChange={(e) => updateRow(i, { pick: e.target.value, autoMatched: false })}
+                            players={rosterOptions}
+                            onChange={(pick) => updateRow(i, { pick, autoMatched: false })}
                             className={[
                               "w-52 rounded-md border bg-panel-alt px-2 py-1 text-sm text-ink outline-none focus:border-gold",
                               (r.pick === "" || clash) ? "border-danger" : r.autoMatched ? "border-success/60" : "border-border",
                             ].join(" ")}
-                          >
-                            <option value="">— pick a player —</option>
-                            <option value="ignore">Ignore this row</option>
-                            {rosterOptions.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.ign}
-                                {p.active === 1 ? "" : " (left guild)"}
-                              </option>
-                            ))}
-                          </select>
+                          />
                           {clash && <p className="text-xs text-danger">Picked for another row too</p>}
                         </td>
                         {(["kills", "assists", "playerDamage", "buildingDamage"] as const).map((k) => (
