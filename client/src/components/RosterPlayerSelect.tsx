@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import type { Player } from "../types";
 
 interface RosterPlayerSelectProps {
@@ -18,8 +19,9 @@ interface Option {
 const IGNORE: Option = { value: "ignore", label: "Ignore this row" };
 
 // A roster-player dropdown with a search box, for long rosters where scrolling a
-// plain <select> is slow. The list is fixed-positioned so the scrolling review
-// table doesn't clip it.
+// plain <select> is slow. The list is portalled to <body> and fixed-positioned so
+// the scrolling review table doesn't clip it and a faded (ignored) row doesn't
+// fade it too.
 export function RosterPlayerSelect({ value, players, onChange, className = "" }: RosterPlayerSelectProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -119,53 +121,55 @@ export function RosterPlayerSelect({ value, players, onChange, className = "" }:
           ▾
         </span>
       </button>
-      {open && (
-        <div
-          ref={panelRef}
-          style={{
-            position: "fixed",
-            left: pos.left,
-            width: pos.width,
-            ...(pos.up ? { bottom: window.innerHeight - pos.top + 4 } : { top: pos.top + 4 }),
-          }}
-          className="z-[60] flex max-h-72 flex-col rounded-lg border border-border bg-panel shadow-2xl shadow-black/50"
-        >
-          <div className="border-b border-border-soft p-2">
-            <input
-              autoFocus
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setActive(0);
-              }}
-              onKeyDown={handleKey}
-              placeholder="Search players…"
-              className="w-full rounded-md border border-border bg-panel-alt px-2 py-1 text-sm text-ink outline-none focus:border-gold"
-            />
-          </div>
-          <ul ref={listRef} className="overflow-y-auto py-1">
-            {options.length === 0 && <li className="px-3 py-2 text-sm text-ink-dim">No matching players.</li>}
-            {options.map((o, i) => (
-              <li key={o.value}>
-                <button
-                  type="button"
-                  onClick={() => choose(o)}
-                  onMouseEnter={() => setActive(i)}
-                  className={[
-                    "flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm",
-                    i === active ? "bg-gold/15 text-heading" : "text-ink",
-                    o.value === value ? "font-semibold text-gold" : "",
-                    o === IGNORE ? "italic text-ink-dim" : "",
-                  ].join(" ")}
-                >
-                  <span className="truncate">{o.label}</span>
-                  {o.note && <span className="shrink-0 text-xs text-ink-dim">{o.note}</span>}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={panelRef}
+            style={{
+              position: "fixed",
+              left: pos.left,
+              width: pos.width,
+              ...(pos.up ? { bottom: window.innerHeight - pos.top + 4 } : { top: pos.top + 4 }),
+            }}
+            className="z-[60] flex max-h-72 flex-col rounded-lg border border-border bg-panel shadow-2xl shadow-black/50"
+          >
+            <div className="border-b border-border-soft p-2">
+              <input
+                autoFocus
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setActive(0);
+                }}
+                onKeyDown={handleKey}
+                placeholder="Search players…"
+                className="w-full rounded-md border border-border bg-panel-alt px-2 py-1 text-sm text-ink outline-none focus:border-gold"
+              />
+            </div>
+            <ul ref={listRef} className="overflow-y-auto py-1">
+              {options.length === 0 && <li className="px-3 py-2 text-sm text-ink-dim">No matching players.</li>}
+              {options.map((o, i) => (
+                <li key={o.value}>
+                  <button
+                    type="button"
+                    onClick={() => choose(o)}
+                    onMouseEnter={() => setActive(i)}
+                    className={[
+                      "flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm",
+                      i === active ? "bg-gold/15 text-heading" : "text-ink",
+                      o.value === value ? "font-semibold text-gold" : "",
+                      o === IGNORE ? "italic text-ink-dim" : "",
+                    ].join(" ")}
+                  >
+                    <span className="truncate">{o.label}</span>
+                    {o.note && <span className="shrink-0 text-xs text-ink-dim">{o.note}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>,
+          document.body
+        )}
     </>
   );
 }
