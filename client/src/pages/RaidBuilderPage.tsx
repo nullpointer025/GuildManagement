@@ -46,6 +46,9 @@ export function RaidBuilderPage() {
   const [savingNotes, setSavingNotes] = useState(false);
   const [notesUnseen, setNotesUnseen] = useState(false);
   const [permaOpen, setPermaOpen] = useState(false);
+  // Everyone in a perma party — kept out of the pool, since they're placed by
+  // applying their perma party rather than one by one.
+  const [permaMemberIds, setPermaMemberIds] = useState<Set<number>>(new Set());
   const exportRef = useRef<HTMLDivElement>(null);
   const notesSeenKey = `guild-notes-seen-${raidId}`;
 
@@ -70,6 +73,15 @@ export function RaidBuilderPage() {
       cancelled = true;
     };
   }, [raidId]);
+
+  async function loadPermaMembers() {
+    const { permaParties } = await api.permaParties();
+    setPermaMemberIds(new Set(permaParties.flatMap((pp) => pp.members.map((m) => m.id))));
+  }
+
+  useEffect(() => {
+    loadPermaMembers();
+  }, []);
 
   // Keep the export range in sync with the active board's actual party count,
   // without clobbering a smaller range the officer deliberately picked.
@@ -126,11 +138,13 @@ export function RaidBuilderPage() {
   const pool = useMemo(() => {
     if (!raid) return [];
     // A player assigned on either board is unavailable on both — Main and Sub share one pool.
-    const assigned = new Set(
-      [...raid.boards.main.parties.flat(), ...raid.boards.sub.parties.flat()]
+    // Perma party members never show here either.
+    const assigned = new Set([
+      ...[...raid.boards.main.parties.flat(), ...raid.boards.sub.parties.flat()]
         .filter(Boolean)
-        .map((p) => (p as Player).id)
-    );
+        .map((p) => (p as Player).id),
+      ...permaMemberIds,
+    ]);
     const q = search.trim().toLowerCase();
     return players
       .filter((p) => p.active === 1 && !assigned.has(p.id))
@@ -147,7 +161,7 @@ export function RaidBuilderPage() {
         }
         return (b[sortKey] ?? -1) - (a[sortKey] ?? -1);
       });
-  }, [raid, players, search, sortKey, classFilter]);
+  }, [raid, players, permaMemberIds, search, sortKey, classFilter]);
 
   async function setSlot(partyIndex: number, slotIndex: number, playerId: number | null) {
     const { raid: updated } = await api.setSlot(raidId, {
@@ -522,7 +536,10 @@ export function RaidBuilderPage() {
           boards={raid.boards}
           defaultBoard={activeBoard}
           onApply={handleApplyPermaParties}
-          onClose={() => setPermaOpen(false)}
+          onClose={() => {
+            setPermaOpen(false);
+            loadPermaMembers();
+          }}
         />
       )}
 
