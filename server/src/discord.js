@@ -1,7 +1,7 @@
 // Reads the guild Discord server's member list through a private bot (token and
 // server ID from env). Plain REST calls — no gateway connection or discord.js.
 
-import { compactName, ignVariants, nameContainsIgn, normalizeName } from "./nameMatch.js";
+import { compactName, ignVariants, nameContainsIgn, normalizeName, wordsSpellName } from "./nameMatch.js";
 
 const API = "https://discord.com/api/v10";
 // Discord rejects requests without a bot-style User-Agent (error 40333).
@@ -60,17 +60,19 @@ export async function fetchGuildMembers() {
 
 // Builds the check the sync runs per player: is this IGN one of these members?
 // A player matches when their IGN (or a single-script part of it) appears as a
-// whole word in any member's name, or when both names are equal once spaces and
-// symbols are ignored (for tags written with different brackets or spacing).
+// whole word in any member's name, or when, ignoring spaces and symbols, it equals
+// the whole name or a run of whole words in it (for tags written with different
+// brackets or spacing, or a nick with extra words like "| Sugar" after the IGN).
 export function createDiscordMatcher(members) {
   const names = [...new Set(members.flatMap((m) => memberNames(m).map(normalizeName)).filter(Boolean))];
   const compactNames = new Set(names.map(compactName).filter(Boolean));
   return (rawIgn) => {
     const ign = normalizeName(rawIgn);
     if (!ign) return false;
-    if (compactNames.has(compactName(ign))) return true;
+    const compact = compactName(ign);
+    if (compactNames.has(compact)) return true;
     const variants = ignVariants(ign);
-    return names.some((name) => variants.some((v) => nameContainsIgn(name, v)));
+    return names.some((name) => variants.some((v) => nameContainsIgn(name, v)) || wordsSpellName(name, compact));
   };
 }
 

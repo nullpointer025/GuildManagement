@@ -80,6 +80,40 @@ export function compactName(name) {
   return name.replace(/[^\p{L}\p{N}\p{M}]/gu, "");
 }
 
+// The words of a name — runs of letters and digits split at spaces, symbols and
+// switches of writing system: "[sugar] daddy | sugar" → ["sugar", "daddy", "sugar"].
+function nameWords(name) {
+  const chars = [...name];
+  const words = [];
+  let word = "";
+  for (let i = 0; i < chars.length; i++) {
+    if (word && !sameWord(chars[i - 1], chars[i])) {
+      words.push(word);
+      word = "";
+    }
+    if (isWordChar(chars[i])) word += chars[i];
+  }
+  if (word) words.push(word);
+  return words;
+}
+
+// True when some run of consecutive whole words in a name spells the compactName()'d
+// IGN, so "［Sugar］DaDDY" (compact "sugardaddy") matches "[Sugar] DaDDY | Sugar"
+// whatever brackets or spacing either side uses. Whole words only, so "Eve" still
+// doesn't match "Steve". The name must already be normalizeName()'d.
+export function wordsSpellName(name, compact) {
+  if (!compact) return false;
+  const words = nameWords(name);
+  for (let i = 0; i < words.length; i++) {
+    let run = "";
+    for (let j = i; j < words.length && run.length < compact.length; j++) {
+      run += words[j];
+      if (run === compact) return true;
+    }
+  }
+  return false;
+}
+
 // True when a screenshot name is a roster name part (4+ characters) with at most
 // two stray characters in front — OCR often reads a "メ" or "鬼" prefix as "X",
 // "A" or "XA", so "XPulgas" is "メPulgas". Both arguments compactName()'d.
