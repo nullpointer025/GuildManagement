@@ -2,6 +2,13 @@
 // makes in-game names, Discord names and screenshot names comparable despite
 // decorations, brackets, spacing, mixed writing systems and I/l swaps.
 
+// Small-capital letters ("xᴇɴʀ") that NFKC leaves alone, mapped to plain Latin so a
+// nick styled in small caps still matches the IGN "Xenr".
+const SMALL_CAPS = Object.fromEntries(
+  [..."ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘꞯʀꜱᴛᴜᴠᴡʏᴢ"].map((ch, i) => [ch, "abcdefghijklmnopqrstuvwyz"[i]])
+);
+const SMALL_CAPS_RE = new RegExp(`[${Object.keys(SMALL_CAPS).join("")}]`, "gu");
+
 // Makes an IGN and a Discord name comparable: Unicode-normalized, case-insensitive,
 // and ignoring stray symbols around the name (e.g. a Discord nick of "`Eve").
 // "i" and "l" are treated as the same letter, since players swap a capital "I" for
@@ -9,6 +16,7 @@
 export function normalizeName(name) {
   return (name ?? "")
     .normalize("NFKC")
+    .replace(SMALL_CAPS_RE, (ch) => SMALL_CAPS[ch])
     .toLowerCase()
     .replace(/l/g, "i")
     .replace(/^[^\p{L}\p{N}]+/u, "")
