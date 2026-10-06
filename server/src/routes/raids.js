@@ -5,10 +5,27 @@ import { requireAccess } from "../auth.js";
 export const raidsRouter = Router();
 raidsRouter.use(requireAccess);
 
-const BOARDS = ["main", "sub"];
+// A raid's type fixes which boards it has. Every board shares one roster pool.
+const RAID_TYPE_BOARDS = {
+  guild_league: ["main", "sub"],
+  polarity: ["star", "normal1", "normal2", "normal3", "normal4"],
+};
 
-function isValidBoard(board) {
-  return BOARDS.includes(board);
+// Raid types whose boards start at fixed sizes instead of the officer-chosen party count.
+const PRESET_PARTY_COUNTS = {
+  polarity: { star: 10, normal1: 5, normal2: 5, normal3: 5, normal4: 5 },
+};
+
+function boardsOf(raid) {
+  return Object.hasOwn(RAID_TYPE_BOARDS, raid.type) ? RAID_TYPE_BOARDS[raid.type] : RAID_TYPE_BOARDS.guild_league;
+}
+
+function isValidBoard(raid, board) {
+  return boardsOf(raid).includes(board);
+}
+
+function partyCounts(raid) {
+  return Object.fromEntries(boardsOf(raid).map((board) => [board, boardPartyCount(raid.id, board)]));
 }
 
 function boardPartyCount(raidId, board) {
@@ -42,10 +59,9 @@ function getRaidWithSlots(raidId) {
   const raid = db.prepare("SELECT * FROM raids WHERE id = ?").get(raidId);
   if (!raid) return null;
 
-  const boards = {
-    main: emptyBoardShape(boardPartyCount(raidId, "main")),
-    sub: emptyBoardShape(boardPartyCount(raidId, "sub")),
-  };
+  const boards = Object.fromEntries(
+    boardsOf(raid).map((board) => [board, emptyBoardShape(boardPartyCount(raidId, board))])
+  );
 
   const slots = db
     .prepare(
@@ -99,30 +115,32 @@ function getRaidWithSlots(raidId) {
 
 raidsRouter.get("/", (req, res) => {
   const raids = db
-    .prepare("SELECT id, name, created_at, updated_at FROM raids ORDER BY updated_at DESC")
+    .prepare("SELECT id, name, type, created_at, updated_at FROM raids ORDER BY updated_at DESC")
     .all();
-  const withCounts = raids.map((raid) => ({
-    ...raid,
-    mainPartyCount: boardPartyCount(raid.id, "main"),
-    subPartyCount: boardPartyCount(raid.id, "sub"),
-  }));
+  const withCounts = raids.map((raid) => ({ ...raid, partyCounts: partyCounts(raid) }));
   res.json({ raids: withCounts });
 });
 
 raidsRouter.post("/", (req, res) => {
-  const { name, partyCount } = req.body ?? {};
+  const { name, partyCount, type } = req.body ?? {};
   const trimmedName = (name ?? "").trim();
   if (!trimmedName) return res.status(400).json({ error: "Raid name is required" });
+  if (!Object.hasOwn(RAID_TYPE_BOARDS, type)) {
+    return res.status(400).json({ error: "Choose Guild League or Polarity Zone" });
+  }
 
+  const preset = PRESET_PARTY_COUNTS[type];
   const count = Number(partyCount) || 8;
-  if (count < 1 || count > 50) {
+  if (!preset && (count < 1 || count > 50)) {
     return res.status(400).json({ error: "Party count must be between 1 and 50" });
   }
 
-  const info = db.prepare("INSERT INTO raids (name) VALUES (?)").run(trimmedName);
+  const info = db.prepare("INSERT INTO raids (name, type) VALUES (?, ?)").run(trimmedName, type);
 
   const txn = transaction(() => {
-    for (const board of BOARDS) createEmptyBoard(info.lastInsertRowid, board, count);
+    for (const board of RAID_TYPE_BOARDS[type]) {
+      createEmptyBoard(info.lastInsertRowid, board, preset?.[board] ?? count);
+    }
   });
   txn();
 
@@ -153,7 +171,7 @@ raidsRouter.patch("/:id", (req, res) => {
   res.json({ raid: getRaidWithSlots(id) });
 });
 
-// Grow/shrink ONE board's party count. Main and Sub are sized independently.
+// Grow/shrink ONE board's party count. Each board is sized independently.
 raidsRouter.patch("/:id/party-count", (req, res) => {
   const id = Number(req.params.id);
   const raid = db.prepare("SELECT * FROM raids WHERE id = ?").get(id);
@@ -161,7 +179,7 @@ raidsRouter.patch("/:id/party-count", (req, res) => {
 
   const { board, partyCount } = req.body ?? {};
   const count = Number(partyCount);
-  if (!isValidBoard(board) || !Number.isInteger(count) || count < 1 || count > 50) {
+  if (!isValidBoard(raid, board) || !Number.isInteger(count) || count < 1 || count > 50) {
     return res.status(400).json({ error: "Invalid board or party count (must be 1-50)" });
   }
 
@@ -217,8 +235,8 @@ raidsRouter.delete("/:id", (req, res) => {
 });
 
 // Assign (or clear) a single slot on one board. Clears the player's previous slot
-// anywhere in this raid — on EITHER board — so a player can never be double-booked
-// between Main and Sub, nor hold two slots on the same board.
+// anywhere in this raid — on ANY board — so a player can never be double-booked
+// across boards, nor hold two slots on the same board.
 raidsRouter.put("/:id/slots", (req, res) => {
   const raidId = Number(req.params.id);
   const raid = db.prepare("SELECT * FROM raids WHERE id = ?").get(raidId);
@@ -226,7 +244,7 @@ raidsRouter.put("/:id/slots", (req, res) => {
 
   const { board, partyIndex, slotIndex, playerId } = req.body ?? {};
   if (
-    !isValidBoard(board) ||
+    !isValidBoard(raid, board) ||
     !Number.isInteger(partyIndex) ||
     !Number.isInteger(slotIndex) ||
     partyIndex < 0 ||
@@ -257,7 +275,7 @@ raidsRouter.put("/:id/slots", (req, res) => {
 // Places perma parties into the parties the officer picked on one board, naming
 // each party after its perma party. The board's party count never changes. Anyone
 // already in a target party goes back to the pool; members placed elsewhere in this
-// raid (either board) are moved; members who have left the guild (inactive) are
+// raid (any board) are moved; members who have left the guild (inactive) are
 // skipped. A perma party already sitting together in its target party is left
 // alone, and a party emptied by the move loses its perma name.
 raidsRouter.post("/:id/apply-perma-parties", (req, res) => {
@@ -266,7 +284,7 @@ raidsRouter.post("/:id/apply-perma-parties", (req, res) => {
   if (!raid) return res.status(404).json({ error: "Raid not found" });
 
   const { board, assignments } = req.body ?? {};
-  if (!isValidBoard(board)) return res.status(400).json({ error: "Invalid board" });
+  if (!isValidBoard(raid, board)) return res.status(400).json({ error: "Invalid board" });
   if (!Array.isArray(assignments) || assignments.length === 0) {
     return res.status(400).json({ error: "Select at least one perma party" });
   }
@@ -348,6 +366,56 @@ raidsRouter.post("/:id/apply-perma-parties", (req, res) => {
   res.json({ raid: getRaidWithSlots(raidId), skipped, alreadyPlaced });
 });
 
+function isPriest(className) {
+  return (className ?? "").toLowerCase().replace(/[^a-z]/g, "").includes("priest");
+}
+
+// Gives every party on one board that has no priest yet the best-geared free priest,
+// in its first empty slot. Free means active, not placed anywhere in this raid, and not
+// in a perma party (same rule as the builder's pool). Full parties are left alone.
+raidsRouter.post("/:id/auto-assign-priests", (req, res) => {
+  const raidId = Number(req.params.id);
+  const raid = db.prepare("SELECT * FROM raids WHERE id = ?").get(raidId);
+  if (!raid) return res.status(404).json({ error: "Raid not found" });
+
+  const { board } = req.body ?? {};
+  if (!isValidBoard(raid, board)) return res.status(400).json({ error: "Invalid board" });
+
+  const priests = db
+    .prepare(
+      `SELECT id, class FROM players
+       WHERE active = 1
+         AND id NOT IN (SELECT player_id FROM raid_slots WHERE raid_id = ? AND player_id IS NOT NULL)
+         AND id NOT IN (SELECT player_id FROM perma_party_members)
+       ORDER BY gear_score IS NULL, gear_score DESC, ign COLLATE NOCASE`
+    )
+    .all(raidId)
+    .filter((p) => isPriest(p.class));
+
+  const { parties } = getRaidWithSlots(raidId).boards[board];
+  const setSlot = db.prepare(
+    "UPDATE raid_slots SET player_id = ? WHERE raid_id = ? AND board = ? AND party_index = ? AND slot_index = ?"
+  );
+
+  let assigned = 0;
+  const full = [];
+  const noPriestLeft = [];
+  transaction(() => {
+    parties.forEach((members, partyIndex) => {
+      if (members.some((m) => m && isPriest(m.class))) return;
+      const slot = members.findIndex((m) => m == null);
+      if (slot === -1) return full.push(partyIndex + 1);
+      const priest = priests[assigned];
+      if (!priest) return noPriestLeft.push(partyIndex + 1);
+      setSlot.run(priest.id, raidId, board, partyIndex, slot);
+      assigned++;
+    });
+    if (assigned > 0) db.prepare("UPDATE raids SET updated_at = datetime('now') WHERE id = ?").run(raidId);
+  })();
+
+  res.json({ raid: getRaidWithSlots(raidId), assigned, full, noPriestLeft });
+});
+
 // Set (or clear, with an empty/omitted name) a party's custom display name on one board.
 raidsRouter.patch("/:id/parties/:partyIndex", (req, res) => {
   const raidId = Number(req.params.id);
@@ -357,7 +425,7 @@ raidsRouter.patch("/:id/parties/:partyIndex", (req, res) => {
 
   const { board } = req.body ?? {};
   if (
-    !isValidBoard(board) ||
+    !isValidBoard(raid, board) ||
     !Number.isInteger(partyIndex) ||
     partyIndex < 0 ||
     partyIndex >= boardPartyCount(raidId, board)

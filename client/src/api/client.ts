@@ -1,5 +1,6 @@
 import type {
   ApplyPermaPartiesResult,
+  AutoAssignPriestsResult,
   DiscordSyncSummary,
   ImportSummary,
   League,
@@ -14,6 +15,7 @@ import type {
   RaidBoardKey,
   RaidDetail,
   RaidSummary,
+  RaidType,
   TrackerPlayer,
 } from "../types";
 
@@ -69,7 +71,7 @@ export const api = {
   },
 
   raids: () => request<{ raids: RaidSummary[] }>("/raids"),
-  createRaid: (payload: { name: string; partyCount: number }) =>
+  createRaid: (payload: { name: string; partyCount: number; type: RaidType }) =>
     request<{ raid: RaidDetail }>("/raids", { method: "POST", body: JSON.stringify(payload) }),
   getRaid: (id: number) => request<{ raid: RaidDetail }>(`/raids/${id}`),
   updateRaid: (id: number, payload: { name: string }) =>
@@ -93,6 +95,11 @@ export const api = {
     request<ApplyPermaPartiesResult>(`/raids/${id}/apply-perma-parties`, {
       method: "POST",
       body: JSON.stringify({ board, assignments }),
+    }),
+  autoAssignPriests: (id: number, board: RaidBoardKey) =>
+    request<AutoAssignPriestsResult>(`/raids/${id}/auto-assign-priests`, {
+      method: "POST",
+      body: JSON.stringify({ board }),
     }),
 
   permaParties: () => request<{ permaParties: PermaParty[] }>("/perma-parties"),

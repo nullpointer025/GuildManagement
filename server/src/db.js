@@ -57,14 +57,15 @@ CREATE TABLE IF NOT EXISTS players (
 CREATE TABLE IF NOT EXISTS raids (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'guild_league',
   notes TEXT,
   notes_updated_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- "board" splits each raid into two independent party grids ('main' and 'sub')
--- that share the same roster pool but hold separate, independently-sized rosters.
+-- "board" splits each raid into independent party grids — 'main'/'sub' for a Guild
+-- League raid, 'star'/'normal1'..'normal4' for a Polarity Zone raid — that share the same roster pool but hold separate, independently-sized rosters.
 -- A board's party count is however many party_index values exist for it here —
 -- there is no separate stored count to keep in sync.
 CREATE TABLE IF NOT EXISTS raid_slots (
@@ -247,8 +248,19 @@ function migrateAddUltimateColumn() {
   }
 }
 
+// One-time migration adding the raid type, which decides its boards: Guild League
+// raids have Main/Sub, Polarity Zone raids have one board per dungeon. Every raid
+// made before types existed was a Guild League raid.
+function migrateAddRaidTypeColumn() {
+  const columns = db.prepare("PRAGMA table_info(raids)").all();
+  if (!columns.some((c) => c.name === "type")) {
+    db.exec("ALTER TABLE raids ADD COLUMN type TEXT NOT NULL DEFAULT 'guild_league'");
+  }
+}
+
 migrateAddBoardColumn();
 migrateRemoveAccountsAndSharedPartyCount();
 migrateAddNotesColumns();
 migrateAddInDiscordColumn();
 migrateAddUltimateColumn();
+migrateAddRaidTypeColumn();

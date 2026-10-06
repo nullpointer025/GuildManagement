@@ -1,14 +1,17 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
-import type { RaidSummary } from "../types";
+import type { RaidSummary, RaidType } from "../types";
 import { buttonClass, inputClass } from "../components/FormKit";
+import { RAID_TYPE_BOARDS, RAID_TYPE_LABELS } from "../lib/raidTypes";
 
 export function RaidsListPage() {
   const [raids, setRaids] = useState<RaidSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
   const [partyCount, setPartyCount] = useState(8);
+  // No default: officers must say which content the raid is for.
+  const [type, setType] = useState<RaidType | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -30,10 +33,14 @@ export function RaidsListPage() {
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
+    if (!type) {
+      setError("Choose whether this raid is for Guild League or Polarity Zone");
+      return;
+    }
     setCreating(true);
     setError(null);
     try {
-      const { raid } = await api.createRaid({ name: name.trim(), partyCount });
+      const { raid } = await api.createRaid({ name: name.trim(), partyCount, type });
       navigate(`/raids/${raid.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to create raid");
@@ -74,17 +81,51 @@ export function RaidsListPage() {
         </div>
         <div>
           <label className="mb-2 block text-sm font-medium uppercase tracking-wide text-ink-dim">
-            Parties ({partyCount * 5} players)
+            Raid for
           </label>
-          <input
-            type="number"
-            min={1}
-            max={50}
-            value={partyCount}
-            onChange={(e) => setPartyCount(Number(e.target.value))}
-            className={`${inputClass} w-32`}
-          />
+          <div className="flex items-center gap-1 rounded-lg border border-border p-1">
+            {(Object.keys(RAID_TYPE_LABELS) as RaidType[]).map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => {
+                  setType(key);
+                  setError(null);
+                }}
+                className={[
+                  "rounded-md px-4 py-1.5 text-sm font-semibold transition-colors",
+                  type === key ? "bg-gold text-bg" : "text-ink-dim hover:bg-panel-alt hover:text-ink",
+                ].join(" ")}
+              >
+                {RAID_TYPE_LABELS[key]}
+              </button>
+            ))}
+          </div>
         </div>
+        {type === "polarity" ? (
+          <div>
+            <label className="mb-2 block text-sm font-medium uppercase tracking-wide text-ink-dim">
+              Parties
+            </label>
+            <p className="py-2.5 text-sm text-ink">
+              {RAID_TYPE_BOARDS.polarity.map((b) => `${b.label}: ${b.presetParties}`).join(" · ")}
+            </p>
+          </div>
+        ) : (
+          <div>
+            <label className="mb-2 block text-sm font-medium uppercase tracking-wide text-ink-dim">
+              Parties per tab ({partyCount * 5} players)
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={partyCount}
+              onChange={(e) => setPartyCount(Number(e.target.value))}
+              className={`${inputClass} w-32`}
+            />
+          </div>
+        )}
         <button type="submit" disabled={creating} className={`${buttonClass} w-auto px-8`}>
           {creating ? "Creating…" : "Create raid"}
         </button>
@@ -110,8 +151,11 @@ export function RaidsListPage() {
               className="block w-full text-left"
             >
               <h3 className="truncate pr-6 text-lg font-semibold text-heading">{raid.name}</h3>
+              <p className="mt-1 text-sm font-medium text-gold">{RAID_TYPE_LABELS[raid.type]}</p>
               <p className="mt-1.5 text-sm text-ink-dim">
-                Main: {raid.mainPartyCount} parties · Sub: {raid.subPartyCount} parties
+                {RAID_TYPE_BOARDS[raid.type]
+                  .map((b) => `${b.label}: ${raid.partyCounts[b.key] ?? 0} parties`)
+                  .join(" · ")}
               </p>
               <p className="mt-4 text-sm text-ink-dim">
                 Updated {new Date(raid.updated_at).toLocaleString()}

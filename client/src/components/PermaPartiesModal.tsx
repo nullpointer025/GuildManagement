@@ -9,10 +9,13 @@ import type {
   RaidDetail,
 } from "../types";
 import { getClassColor } from "../lib/classColors";
+import { boardLabel, type BoardInfo } from "../lib/raidTypes";
 
 interface PermaPartiesModalProps {
   players: Player[];
   boards: RaidDetail["boards"];
+  // The raid's boards, in tab order, offered as apply targets.
+  boardOptions: BoardInfo[];
   defaultBoard: RaidBoardKey;
   onApply: (board: RaidBoardKey, assignments: PermaPartyAssignment[]) => Promise<ApplyPermaPartiesResult>;
   onClose: () => void;
@@ -109,15 +112,15 @@ function TargetPicker({
   );
 }
 
-export function PermaPartiesModal({ players, boards, defaultBoard, onApply, onClose }: PermaPartiesModalProps) {
+export function PermaPartiesModal({ players, boards, boardOptions, defaultBoard, onApply, onClose }: PermaPartiesModalProps) {
   const [permaParties, setPermaParties] = useState<PermaParty[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [board, setBoard] = useState<RaidBoardKey>(defaultBoard);
   // Target party (0-based) on `board` for each selected perma party.
   const [targets, setTargets] = useState<Record<number, number>>({});
-  const boardParties = boards[board].parties;
-  const boardNames = boards[board].partyNames;
+  const boardParties = boards[board]?.parties ?? [];
+  const boardNames = boards[board]?.partyNames ?? [];
   const [draft, setDraft] = useState<Draft | null>(null);
   const [search, setSearch] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
@@ -205,7 +208,7 @@ export function PermaPartiesModal({ players, boards, defaultBoard, onApply, onCl
   // together), else the first empty party no other selection has claimed, else the
   // first unclaimed party at all.
   function defaultTarget(id: number, forBoard: RaidBoardKey, claimed: Set<number>) {
-    const parties = boards[forBoard].parties;
+    const parties = boards[forBoard]?.parties ?? [];
     const active = permaParties.find((pp) => pp.id === id)?.members.filter((m) => m.active === 1) ?? [];
     const current = parties.findIndex(
       (party) => active.length > 0 && active.every((m) => party.some((p) => p?.id === m.id))
@@ -256,7 +259,7 @@ export function PermaPartiesModal({ players, boards, defaultBoard, onApply, onCl
         .map((pp) => ({ permaPartyId: pp.id, partyIndex: targets[pp.id] }));
       const { skipped, alreadyPlaced } = await onApply(board, assignments);
       const placed = assignments.length - alreadyPlaced.length;
-      const parts = [`Applied ${placed} perma part${placed === 1 ? "y" : "ies"} to ${board === "main" ? "Main" : "Sub"}.`];
+      const parts = [`Applied ${placed} perma part${placed === 1 ? "y" : "ies"} to ${boardLabel(board)}.`];
       if (alreadyPlaced.length) parts.push(`Already there: ${alreadyPlaced.join(", ")}.`);
       if (skipped.length) parts.push(`Skipped (not in latest roster): ${skipped.join(", ")}.`);
       setNotice(parts.join(" "));
@@ -271,10 +274,11 @@ export function PermaPartiesModal({ players, boards, defaultBoard, onApply, onCl
 
   const boardButton = (key: RaidBoardKey, label: string) => (
     <button
+      key={key}
       type="button"
       onClick={() => switchBoard(key)}
       className={[
-        "rounded-md px-3 py-1 text-sm font-semibold transition-colors",
+        "rounded-md px-3 py-1 text-sm font-semibold uppercase transition-colors",
         board === key ? "bg-gold text-bg" : "text-ink-dim hover:bg-panel-alt hover:text-ink",
       ].join(" ")}
     >
@@ -484,9 +488,8 @@ export function PermaPartiesModal({ players, boards, defaultBoard, onApply, onCl
             {notice && !error && <p className="px-4 pb-2 text-sm text-success">{notice}</p>}
             <div className="flex flex-wrap items-center justify-end gap-3 border-t border-border p-4">
               <span className="text-sm text-ink-dim">Apply {selected.size} selected to</span>
-              <div className="flex items-center gap-1 rounded-lg border border-border p-1">
-                {boardButton("main", "MAIN")}
-                {boardButton("sub", "SUB")}
+              <div className="flex flex-wrap items-center gap-1 rounded-lg border border-border p-1">
+                {boardOptions.map((b) => boardButton(b.key, b.label))}
               </div>
               <button
                 type="button"

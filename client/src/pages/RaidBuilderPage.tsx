@@ -19,6 +19,7 @@ import { PlayerCard } from "../components/PlayerCard";
 import { PlayerPickerModal } from "../components/PlayerPickerModal";
 import { NotesModal } from "../components/NotesModal";
 import { PermaPartiesModal } from "../components/PermaPartiesModal";
+import { RAID_TYPE_BOARDS, boardLabel } from "../lib/raidTypes";
 
 type SortKey = "gear_score" | "level" | "ign" | "class";
 
@@ -46,6 +47,8 @@ export function RaidBuilderPage() {
   const [savingNotes, setSavingNotes] = useState(false);
   const [notesUnseen, setNotesUnseen] = useState(false);
   const [permaOpen, setPermaOpen] = useState(false);
+  const [assigningPriests, setAssigningPriests] = useState(false);
+  const [priestNotice, setPriestNotice] = useState<string | null>(null);
   // Everyone in a perma party — kept out of the pool, since they're placed by
   // applying their perma party rather than one by one.
   const [permaMemberIds, setPermaMemberIds] = useState<Set<number>>(new Set());
@@ -65,7 +68,7 @@ export function RaidBuilderPage() {
       setRaid(raidRes.raid);
       setNameDraft(raidRes.raid.name);
       setPlayers(playersRes.players);
-      setActiveBoard("main");
+      setActiveBoard(RAID_TYPE_BOARDS[raidRes.raid.type][0].key);
       setLoading(false);
     }
     load();
@@ -83,9 +86,13 @@ export function RaidBuilderPage() {
     loadPermaMembers();
   }, []);
 
+  useEffect(() => {
+    setPriestNotice(null);
+  }, [activeBoard]);
+
   // Keep the export range in sync with the active board's actual party count,
   // without clobbering a smaller range the officer deliberately picked.
-  const activeBoardPartyCount = raid?.boards[activeBoard].parties.length;
+  const activeBoardPartyCount = raid?.boards[activeBoard]?.parties.length;
   useEffect(() => {
     if (!activeBoardPartyCount) return;
     setExportTo((prev) => Math.min(prev, activeBoardPartyCount) || activeBoardPartyCount);
@@ -137,10 +144,11 @@ export function RaidBuilderPage() {
 
   const pool = useMemo(() => {
     if (!raid) return [];
-    // A player assigned on either board is unavailable on both — Main and Sub share one pool.
+    // A player assigned on any board is unavailable on all of them — every board shares one pool.
     // Perma party members never show here either.
     const assigned = new Set([
-      ...[...raid.boards.main.parties.flat(), ...raid.boards.sub.parties.flat()]
+      ...Object.values(raid.boards)
+        .flatMap((b) => b.parties.flat())
         .filter(Boolean)
         .map((p) => (p as Player).id),
       ...permaMemberIds,
@@ -207,7 +215,7 @@ export function RaidBuilderPage() {
       return;
     }
 
-    const occupant = raid.boards[activeBoard].parties[partyIndex]?.[slotIndex] ?? null;
+    const occupant = raid.boards[activeBoard]?.parties[partyIndex]?.[slotIndex] ?? null;
     await setSlot(partyIndex, slotIndex, activeData.player.id);
 
     if (occupant && activeData.from.type === "slot") {
@@ -216,8 +224,8 @@ export function RaidBuilderPage() {
   }
 
   async function handlePartyCountChange(delta: number) {
-    if (!raid) return;
-    const current = raid.boards[activeBoard].parties.length;
+    const current = raid?.boards[activeBoard]?.parties.length;
+    if (!current) return;
     const next = current + delta;
     if (next < 1 || next > 50) return;
     const { raid: updated } = await api.updatePartyCount(raidId, activeBoard, next);
@@ -274,6 +282,22 @@ export function RaidBuilderPage() {
     return result;
   }
 
+  async function handleAutoAssignPriests() {
+    setAssigningPriests(true);
+    try {
+      const { raid: updated, assigned, full, noPriestLeft } = await api.autoAssignPriests(raidId, activeBoard);
+      setRaid(updated);
+      const parts = [`Assigned ${assigned} priest${assigned === 1 ? "" : "s"} on ${boardLabel(activeBoard)}.`];
+      if (noPriestLeft.length) parts.push(`No free priest left for part${noPriestLeft.length === 1 ? "y" : "ies"} ${noPriestLeft.join(", ")}.`);
+      if (full.length) parts.push(`Full, skipped: part${full.length === 1 ? "y" : "ies"} ${full.join(", ")}.`);
+      setPriestNotice(parts.join(" "));
+    } catch (err) {
+      setPriestNotice(err instanceof Error ? err.message : "Couldn't auto assign priests");
+    } finally {
+      setAssigningPriests(false);
+    }
+  }
+
   async function handleDeleteRaid() {
     if (!confirm("Delete this raid team? This cannot be undone.")) return;
     await api.deleteRaid(raidId);
@@ -304,7 +328,9 @@ export function RaidBuilderPage() {
         });
         const link = document.createElement("a");
         const safeName = raid.name.trim().replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "raid-team";
-        link.download = `${safeName}${activeBoard === "sub" ? "-sub" : ""}.png`;
+        const boardSuffix =
+          activeBoard === "main" ? "" : `-${boardLabel(activeBoard).replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
+        link.download = `${safeName}${boardSuffix}.png`;
         link.href = dataUrl;
         link.click();
       } catch (err) {
@@ -320,11 +346,12 @@ export function RaidBuilderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exporting]);
 
-  if (loading || !raid) {
+  const board = raid?.boards[activeBoard];
+  if (loading || !raid || !board) {
     return <p className="text-base text-ink-dim">Loading raid…</p>;
   }
 
-  const board = raid.boards[activeBoard];
+  const raidBoards = RAID_TYPE_BOARDS[raid.type];
   const totalAssigned = board.parties.flat().filter(Boolean).length;
   const totalSlots = board.parties.length * 5;
   const exportCount = Math.max(1, exportTo - exportFrom + 1);
@@ -352,35 +379,28 @@ export function RaidBuilderPage() {
             />
             <p className="mt-1.5 px-1.5 text-base text-ink-dim">
               {totalAssigned}/{totalSlots} players assigned ·{" "}
-              <span className={activeBoard === "main" ? "text-gold" : "text-ink-dim"}>
-                {activeBoard === "main" ? "Main" : "Sub"} roster
+              <span className={activeBoard === raidBoards[0].key ? "text-gold" : "text-ink-dim"}>
+                {boardLabel(activeBoard)} roster
               </span>
             </p>
+            {priestNotice && <p className="mt-1 px-1.5 text-sm text-ink-dim">{priestNotice}</p>}
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1 rounded-lg border border-border p-1">
-              <button
-                onClick={() => setActiveBoard("main")}
-                className={[
-                  "rounded-md px-4 py-1.5 text-sm font-semibold transition-colors",
-                  activeBoard === "main"
-                    ? "bg-gold text-bg"
-                    : "text-ink-dim hover:bg-panel-alt hover:text-ink",
-                ].join(" ")}
-              >
-                MAIN
-              </button>
-              <button
-                onClick={() => setActiveBoard("sub")}
-                className={[
-                  "rounded-md px-4 py-1.5 text-sm font-semibold transition-colors",
-                  activeBoard === "sub"
-                    ? "bg-gold text-bg"
-                    : "text-ink-dim hover:bg-panel-alt hover:text-ink",
-                ].join(" ")}
-              >
-                SUB
-              </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-1 rounded-lg border border-border p-1">
+              {raidBoards.map((b) => (
+                <button
+                  key={b.key}
+                  onClick={() => setActiveBoard(b.key)}
+                  className={[
+                    "rounded-md px-4 py-1.5 text-sm font-semibold uppercase transition-colors",
+                    activeBoard === b.key
+                      ? "bg-gold text-bg"
+                      : "text-ink-dim hover:bg-panel-alt hover:text-ink",
+                  ].join(" ")}
+                >
+                  {b.label}
+                </button>
+              ))}
             </div>
             <div className="flex items-center gap-1 rounded-lg border border-border p-1">
               <button
@@ -429,6 +449,15 @@ export function RaidBuilderPage() {
                 className="w-14 rounded-md border border-transparent bg-panel-alt px-2 py-1 text-center text-sm text-ink outline-none focus:border-gold"
               />
             </div>
+            {raid.type === "polarity" && (
+              <button
+                onClick={handleAutoAssignPriests}
+                disabled={assigningPriests}
+                className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {assigningPriests ? "Assigning…" : "Auto assign priest"}
+              </button>
+            )}
             <button
               onClick={() => setPermaOpen(true)}
               className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold"
@@ -534,6 +563,7 @@ export function RaidBuilderPage() {
         <PermaPartiesModal
           players={players}
           boards={raid.boards}
+          boardOptions={raidBoards}
           defaultBoard={activeBoard}
           onApply={handleApplyPermaParties}
           onClose={() => {
@@ -561,7 +591,7 @@ export function RaidBuilderPage() {
           <div ref={exportRef} className="rounded-2xl bg-bg p-2">
             <div className="mb-4 px-1">
               <h2 className="text-xl font-bold text-heading">
-                {raid.name} <span className="text-ink-dim">— {activeBoard === "main" ? "Main" : "Sub"}</span>
+                {raid.name} <span className="text-ink-dim">— {boardLabel(activeBoard)}</span>
               </h2>
               <p className="text-sm text-ink-dim">
                 {exportSlice.flat().filter(Boolean).length}/{exportCount * 5} players assigned

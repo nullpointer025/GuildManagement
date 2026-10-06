@@ -19,24 +19,28 @@ export interface Player {
 // Officer-editable yes/no fields on a player, shown as roster checkboxes.
 export type PlayerFlag = "in_discord" | "ultimate";
 
+// Guild League raids have Main/Sub boards; Polarity Zone raids have one board per dungeon.
+export type RaidType = "guild_league" | "polarity";
+
+export type RaidBoardKey = "main" | "sub" | "star" | "normal1" | "normal2" | "normal3" | "normal4";
+
 export interface RaidSummary {
   id: number;
   name: string;
-  mainPartyCount: number;
-  subPartyCount: number;
+  type: RaidType;
+  // Only the boards this raid's type has.
+  partyCounts: Partial<Record<RaidBoardKey, number>>;
   created_at: string;
   updated_at: string;
 }
-
-export type RaidBoardKey = "main" | "sub";
 
 export interface RaidBoard {
   parties: (Player | null)[][];
   partyNames: (string | null)[];
 }
 
-export interface RaidDetail extends RaidSummary {
-  boards: Record<RaidBoardKey, RaidBoard>;
+export interface RaidDetail extends Omit<RaidSummary, "partyCounts"> {
+  boards: Partial<Record<RaidBoardKey, RaidBoard>>;
   notes: string | null;
   notes_updated_at: string | null;
 }
@@ -117,6 +121,14 @@ export interface ApplyPermaPartiesResult {
   raid: RaidDetail;
   skipped: string[];
   alreadyPlaced: string[];
+}
+
+// Party numbers (1-based) are listed for parties auto-assign couldn't give a priest.
+export interface AutoAssignPriestsResult {
+  raid: RaidDetail;
+  assigned: number;
+  full: number[];
+  noPriestLeft: number[];
 }
 
 export interface DiscordSyncSummary {
