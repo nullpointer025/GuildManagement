@@ -19,6 +19,7 @@ import { PlayerCard } from "../components/PlayerCard";
 import { PlayerPickerModal } from "../components/PlayerPickerModal";
 import { NotesModal } from "../components/NotesModal";
 import { PermaPartiesModal } from "../components/PermaPartiesModal";
+import { ClassCounter } from "../components/ClassCounter";
 import { RAID_TYPE_BOARDS, boardLabel } from "../lib/raidTypes";
 
 type SortKey = "gear_score" | "level" | "ign" | "class";
@@ -449,15 +450,13 @@ export function RaidBuilderPage() {
                 className="w-14 rounded-md border border-transparent bg-panel-alt px-2 py-1 text-center text-sm text-ink outline-none focus:border-gold"
               />
             </div>
-            {raid.type === "polarity" && (
-              <button
-                onClick={handleAutoAssignPriests}
-                disabled={assigningPriests}
-                className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {assigningPriests ? "Assigning…" : "Auto assign priest"}
-              </button>
-            )}
+            <button
+              onClick={handleAutoAssignPriests}
+              disabled={assigningPriests}
+              className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {assigningPriests ? "Assigning…" : "Auto assign priest"}
+            </button>
             <button
               onClick={() => setPermaOpen(true)}
               className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold"
@@ -491,6 +490,13 @@ export function RaidBuilderPage() {
               Delete raid
             </button>
           </div>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-dim">
+            Classes deployed · {boardLabel(activeBoard)}
+          </h2>
+          <ClassCounter parties={board.parties} />
         </div>
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-[320px_1fr]">
