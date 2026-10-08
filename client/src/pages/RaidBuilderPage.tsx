@@ -10,7 +10,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { api } from "../api/client";
-import type { PermaPartyAssignment, Player, RaidBoardKey, RaidDetail } from "../types";
+import type { AutoAssignRole, PermaPartyAssignment, Player, RaidBoardKey, RaidDetail } from "../types";
 import type { DragOrigin } from "../components/DraggablePlayer";
 import { PoolPanel } from "../components/PoolPanel";
 import { Party } from "../components/Party";
@@ -23,6 +23,11 @@ import { ClassCounter } from "../components/ClassCounter";
 import { RAID_TYPE_BOARDS, boardLabel } from "../lib/raidTypes";
 
 type SortKey = "gear_score" | "level" | "ign" | "class";
+
+const AUTO_ASSIGN_LABELS: Record<AutoAssignRole, { one: string; many: string }> = {
+  priest: { one: "priest", many: "priests" },
+  clown_gypsy: { one: "clown/gypsy", many: "clowns/gypsies" },
+};
 
 export function RaidBuilderPage() {
   const { id } = useParams();
@@ -48,8 +53,8 @@ export function RaidBuilderPage() {
   const [savingNotes, setSavingNotes] = useState(false);
   const [notesUnseen, setNotesUnseen] = useState(false);
   const [permaOpen, setPermaOpen] = useState(false);
-  const [assigningPriests, setAssigningPriests] = useState(false);
-  const [priestNotice, setPriestNotice] = useState<string | null>(null);
+  const [assigningRole, setAssigningRole] = useState<AutoAssignRole | null>(null);
+  const [autoAssignNotice, setAutoAssignNotice] = useState<string | null>(null);
   // Everyone in a perma party — kept out of the pool, since they're placed by
   // applying their perma party rather than one by one.
   const [permaMemberIds, setPermaMemberIds] = useState<Set<number>>(new Set());
@@ -88,7 +93,7 @@ export function RaidBuilderPage() {
   }, []);
 
   useEffect(() => {
-    setPriestNotice(null);
+    setAutoAssignNotice(null);
   }, [activeBoard]);
 
   // Keep the export range in sync with the active board's actual party count,
@@ -283,19 +288,20 @@ export function RaidBuilderPage() {
     return result;
   }
 
-  async function handleAutoAssignPriests() {
-    setAssigningPriests(true);
+  async function handleAutoAssign(role: AutoAssignRole) {
+    const label = AUTO_ASSIGN_LABELS[role];
+    setAssigningRole(role);
     try {
-      const { raid: updated, assigned, full, noPriestLeft } = await api.autoAssignPriests(raidId, activeBoard);
+      const { raid: updated, assigned, full, noneLeft } = await api.autoAssign(raidId, activeBoard, role);
       setRaid(updated);
-      const parts = [`Assigned ${assigned} priest${assigned === 1 ? "" : "s"} on ${boardLabel(activeBoard)}.`];
-      if (noPriestLeft.length) parts.push(`No free priest left for part${noPriestLeft.length === 1 ? "y" : "ies"} ${noPriestLeft.join(", ")}.`);
+      const parts = [`Assigned ${assigned} ${assigned === 1 ? label.one : label.many} on ${boardLabel(activeBoard)}.`];
+      if (noneLeft.length) parts.push(`No free ${label.one} left for part${noneLeft.length === 1 ? "y" : "ies"} ${noneLeft.join(", ")}.`);
       if (full.length) parts.push(`Full, skipped: part${full.length === 1 ? "y" : "ies"} ${full.join(", ")}.`);
-      setPriestNotice(parts.join(" "));
+      setAutoAssignNotice(parts.join(" "));
     } catch (err) {
-      setPriestNotice(err instanceof Error ? err.message : "Couldn't auto assign priests");
+      setAutoAssignNotice(err instanceof Error ? err.message : `Couldn't auto assign ${label.many}`);
     } finally {
-      setAssigningPriests(false);
+      setAssigningRole(null);
     }
   }
 
@@ -384,7 +390,7 @@ export function RaidBuilderPage() {
                 {boardLabel(activeBoard)} roster
               </span>
             </p>
-            {priestNotice && <p className="mt-1 px-1.5 text-sm text-ink-dim">{priestNotice}</p>}
+            {autoAssignNotice && <p className="mt-1 px-1.5 text-sm text-ink-dim">{autoAssignNotice}</p>}
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex flex-wrap items-center gap-1 rounded-lg border border-border p-1">
@@ -450,13 +456,16 @@ export function RaidBuilderPage() {
                 className="w-14 rounded-md border border-transparent bg-panel-alt px-2 py-1 text-center text-sm text-ink outline-none focus:border-gold"
               />
             </div>
-            <button
-              onClick={handleAutoAssignPriests}
-              disabled={assigningPriests}
-              className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {assigningPriests ? "Assigning…" : "Auto assign priest"}
-            </button>
+            {(Object.keys(AUTO_ASSIGN_LABELS) as AutoAssignRole[]).map((role) => (
+              <button
+                key={role}
+                onClick={() => handleAutoAssign(role)}
+                disabled={assigningRole != null}
+                className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {assigningRole === role ? "Assigning…" : `Auto assign ${AUTO_ASSIGN_LABELS[role].one}`}
+              </button>
+            ))}
             <button
               onClick={() => setPermaOpen(true)}
               className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold"
@@ -604,6 +613,9 @@ export function RaidBuilderPage() {
                 {(exportFrom > 1 || exportTo < board.parties.length) &&
                   ` · Parties ${exportFrom}–${exportTo}`}
               </p>
+              <div className="mt-3">
+                <ClassCounter parties={exportSlice} />
+              </div>
             </div>
             <div
               className="grid gap-5"

@@ -366,22 +366,32 @@ raidsRouter.post("/:id/apply-perma-parties", (req, res) => {
   res.json({ raid: getRaidWithSlots(raidId), skipped, alreadyPlaced });
 });
 
-function isPriest(className) {
-  return (className ?? "").toLowerCase().replace(/[^a-z]/g, "").includes("priest");
+function normalizeClass(className) {
+  return (className ?? "").toLowerCase().replace(/[^a-z]/g, "");
 }
 
-// Gives every party on one board that has no priest yet the best-geared free priest,
-// in its first empty slot. Free means active, not placed anywhere in this raid, and not
-// in a perma party (same rule as the builder's pool). Full parties are left alone.
-raidsRouter.post("/:id/auto-assign-priests", (req, res) => {
+// Support roles auto-assign can fill, keyed by the role the client asks for. Clown and
+// Gypsy are one role (the gendered versions of the same class), so either counts.
+const AUTO_ASSIGN_ROLES = {
+  priest: (className) => normalizeClass(className).includes("priest"),
+  clown_gypsy: (className) => /clown|gypsy/.test(normalizeClass(className)),
+};
+
+// Gives every party on one board that has no player of the role yet the best-geared free
+// player of that role, in its first empty slot. Free means active, not placed anywhere in
+// this raid, and not in a perma party (same rule as the builder's pool). Full parties are
+// left alone.
+raidsRouter.post("/:id/auto-assign", (req, res) => {
   const raidId = Number(req.params.id);
   const raid = db.prepare("SELECT * FROM raids WHERE id = ?").get(raidId);
   if (!raid) return res.status(404).json({ error: "Raid not found" });
 
-  const { board } = req.body ?? {};
+  const { board, role } = req.body ?? {};
   if (!isValidBoard(raid, board)) return res.status(400).json({ error: "Invalid board" });
+  if (!Object.hasOwn(AUTO_ASSIGN_ROLES, role)) return res.status(400).json({ error: "Invalid role" });
+  const hasRole = AUTO_ASSIGN_ROLES[role];
 
-  const priests = db
+  const candidates = db
     .prepare(
       `SELECT id, class FROM players
        WHERE active = 1
@@ -390,7 +400,7 @@ raidsRouter.post("/:id/auto-assign-priests", (req, res) => {
        ORDER BY gear_score IS NULL, gear_score DESC, ign COLLATE NOCASE`
     )
     .all(raidId)
-    .filter((p) => isPriest(p.class));
+    .filter((p) => hasRole(p.class));
 
   const { parties } = getRaidWithSlots(raidId).boards[board];
   const setSlot = db.prepare(
@@ -399,21 +409,21 @@ raidsRouter.post("/:id/auto-assign-priests", (req, res) => {
 
   let assigned = 0;
   const full = [];
-  const noPriestLeft = [];
+  const noneLeft = [];
   transaction(() => {
     parties.forEach((members, partyIndex) => {
-      if (members.some((m) => m && isPriest(m.class))) return;
+      if (members.some((m) => m && hasRole(m.class))) return;
       const slot = members.findIndex((m) => m == null);
       if (slot === -1) return full.push(partyIndex + 1);
-      const priest = priests[assigned];
-      if (!priest) return noPriestLeft.push(partyIndex + 1);
-      setSlot.run(priest.id, raidId, board, partyIndex, slot);
+      const candidate = candidates[assigned];
+      if (!candidate) return noneLeft.push(partyIndex + 1);
+      setSlot.run(candidate.id, raidId, board, partyIndex, slot);
       assigned++;
     });
     if (assigned > 0) db.prepare("UPDATE raids SET updated_at = datetime('now') WHERE id = ?").run(raidId);
   })();
 
-  res.json({ raid: getRaidWithSlots(raidId), assigned, full, noPriestLeft });
+  res.json({ raid: getRaidWithSlots(raidId), assigned, full, noneLeft });
 });
 
 // Set (or clear, with an empty/omitted name) a party's custom display name on one board.

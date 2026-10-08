@@ -123,12 +123,15 @@ export interface ApplyPermaPartiesResult {
   alreadyPlaced: string[];
 }
 
-// Party numbers (1-based) are listed for parties auto-assign couldn't give a priest.
-export interface AutoAssignPriestsResult {
+// Support roles the raid builder can auto-assign one of per party.
+export type AutoAssignRole = "priest" | "clown_gypsy";
+
+// Party numbers (1-based) are listed for parties auto-assign couldn't fill.
+export interface AutoAssignResult {
   raid: RaidDetail;
   assigned: number;
   full: number[];
-  noPriestLeft: number[];
+  noneLeft: number[];
 }
 
 export interface DiscordSyncSummary {

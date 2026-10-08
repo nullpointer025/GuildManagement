@@ -9,6 +9,9 @@ const CLASS_COLORS: Record<string, string> = {
   assassincross: "#a855f7",
   whitesmith: "#f97316",
   champion: "#15803d",
+  clown: "#ec4899",
+  gypsy: "#ec4899",
+  clowngypsy: "#ec4899",
 };
 
 const DEFAULT_COLOR = "#7a8399";
