@@ -120,7 +120,6 @@ export interface PermaPartyAssignment {
 export interface ApplyPermaPartiesResult {
   raid: RaidDetail;
   skipped: string[];
-  alreadyPlaced: string[];
 }
 
 // Support roles the raid builder can auto-assign one of per party.

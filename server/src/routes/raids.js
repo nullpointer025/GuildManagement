@@ -11,6 +11,16 @@ const RAID_TYPE_BOARDS = {
   polarity: ["star", "normal1", "normal2", "normal3", "normal4"],
 };
 
+const BOARD_LABELS = {
+  main: "Main",
+  sub: "Sub",
+  star: "Star Dungeon",
+  normal1: "Normal Dungeon 1",
+  normal2: "Normal Dungeon 2",
+  normal3: "Normal Dungeon 3",
+  normal4: "Normal Dungeon 4",
+};
+
 // Raid types whose boards start at fixed sizes instead of the officer-chosen party count.
 const PRESET_PARTY_COUNTS = {
   polarity: { star: 10, normal1: 5, normal2: 5, normal3: 5, normal4: 5 },
@@ -274,10 +284,9 @@ raidsRouter.put("/:id/slots", (req, res) => {
 
 // Places perma parties into the parties the officer picked on one board, naming
 // each party after its perma party. The board's party count never changes. Anyone
-// already in a target party goes back to the pool; members placed elsewhere in this
-// raid (any board) are moved; members who have left the guild (inactive) are
-// skipped. A perma party already sitting together in its target party is left
-// alone, and a party emptied by the move loses its perma name.
+// already in a target party goes back to the pool; members who have left the guild
+// (inactive) are skipped. A perma party with any member already deployed in this
+// raid (on any board) is refused, so it can only be placed once per raid.
 raidsRouter.post("/:id/apply-perma-parties", (req, res) => {
   const raidId = Number(req.params.id);
   const raid = db.prepare("SELECT * FROM raids WHERE id = ?").get(raidId);
@@ -310,7 +319,6 @@ raidsRouter.post("/:id/apply-perma-parties", (req, res) => {
   const slotOf = db.prepare("SELECT board, party_index FROM raid_slots WHERE raid_id = ? AND player_id = ?");
 
   const skipped = [];
-  const alreadyPlaced = [];
   const toPlace = [];
   for (const { permaPartyId, partyIndex } of assignments) {
     const party = findParty.get(permaPartyId);
@@ -318,18 +326,18 @@ raidsRouter.post("/:id/apply-perma-parties", (req, res) => {
     const members = membersOf.all(party.id);
     skipped.push(...members.filter((m) => m.active !== 1).map((m) => m.ign));
     const active = members.filter((m) => m.active === 1);
-    const inTarget = active.every((m) => {
-      const at = slotOf.get(raidId, m.id);
-      return at && at.board === board && at.party_index === partyIndex;
-    });
-    if (active.length > 0 && inTarget) alreadyPlaced.push(party.name);
-    else toPlace.push({ ...party, partyIndex, members: active });
+    const deployed = active.map((m) => slotOf.get(raidId, m.id)).find(Boolean);
+    if (deployed) {
+      return res.status(400).json({
+        error: `${party.name} is already deployed on ${BOARD_LABELS[deployed.board] ?? deployed.board} (Party ${deployed.party_index + 1})`,
+      });
+    }
+    toPlace.push({ ...party, partyIndex, members: active });
   }
 
   const clearParty = db.prepare(
     "UPDATE raid_slots SET player_id = NULL WHERE raid_id = ? AND board = ? AND party_index = ?"
   );
-  const clearPlayer = db.prepare("UPDATE raid_slots SET player_id = NULL WHERE raid_id = ? AND player_id = ?");
   const setSlot = db.prepare(
     "UPDATE raid_slots SET player_id = ? WHERE raid_id = ? AND board = ? AND party_index = ? AND slot_index = ?"
   );
@@ -337,33 +345,17 @@ raidsRouter.post("/:id/apply-perma-parties", (req, res) => {
     `INSERT INTO raid_parties (raid_id, board, party_index, name) VALUES (?, ?, ?, ?)
      ON CONFLICT(raid_id, board, party_index) DO UPDATE SET name = excluded.name`
   );
-  const isEmpty = db.prepare(
-    "SELECT COUNT(player_id) = 0 AS empty FROM raid_slots WHERE raid_id = ? AND board = ? AND party_index = ?"
-  );
-  const clearStaleName = db.prepare(
-    "UPDATE raid_parties SET name = NULL WHERE raid_id = ? AND board = ? AND party_index = ? AND name = ?"
-  );
 
   transaction(() => {
-    // Empty every target first, so one perma party's target can't swallow another's members.
-    for (const party of toPlace) clearParty.run(raidId, board, party.partyIndex);
-    const vacated = [];
     for (const party of toPlace) {
-      party.members.forEach((member, slot) => {
-        const from = slotOf.get(raidId, member.id);
-        if (from) vacated.push({ ...from, name: party.name });
-        clearPlayer.run(raidId, member.id);
-        setSlot.run(member.id, raidId, board, party.partyIndex, slot);
-      });
+      clearParty.run(raidId, board, party.partyIndex);
+      party.members.forEach((member, slot) => setSlot.run(member.id, raidId, board, party.partyIndex, slot));
       nameParty.run(raidId, board, party.partyIndex, party.name);
-    }
-    for (const v of vacated) {
-      if (isEmpty.get(raidId, v.board, v.party_index).empty) clearStaleName.run(raidId, v.board, v.party_index, v.name);
     }
     db.prepare("UPDATE raids SET updated_at = datetime('now') WHERE id = ?").run(raidId);
   })();
 
-  res.json({ raid: getRaidWithSlots(raidId), skipped, alreadyPlaced });
+  res.json({ raid: getRaidWithSlots(raidId), skipped });
 });
 
 function normalizeClass(className) {
@@ -511,6 +503,25 @@ raidsRouter.post("/:id/auto-assign-parties", (req, res) => {
     .filter((p) => p.missing.length > 0);
 
   res.json({ raid: getRaidWithSlots(raidId), assigned, incomplete });
+});
+
+// Empties one board: every slot goes back to the pool and custom party names are dropped.
+// The board keeps its party count.
+raidsRouter.post("/:id/clear", (req, res) => {
+  const raidId = Number(req.params.id);
+  const raid = db.prepare("SELECT * FROM raids WHERE id = ?").get(raidId);
+  if (!raid) return res.status(404).json({ error: "Raid not found" });
+
+  const { board } = req.body ?? {};
+  if (!isValidBoard(raid, board)) return res.status(400).json({ error: "Invalid board" });
+
+  transaction(() => {
+    db.prepare("UPDATE raid_slots SET player_id = NULL WHERE raid_id = ? AND board = ?").run(raidId, board);
+    db.prepare("UPDATE raid_parties SET name = NULL WHERE raid_id = ? AND board = ?").run(raidId, board);
+    db.prepare("UPDATE raids SET updated_at = datetime('now') WHERE id = ?").run(raidId);
+  })();
+
+  res.json({ raid: getRaidWithSlots(raidId) });
 });
 
 // Set (or clear, with an empty/omitted name) a party's custom display name on one board.

@@ -335,6 +335,12 @@ export function RaidBuilderPage() {
     }
   }
 
+  async function handleClearBoard() {
+    if (!confirm(`Clear every player and party name from ${boardLabel(activeBoard)}?`)) return;
+    const { raid: updated } = await api.clearBoard(raidId, activeBoard);
+    setRaid(updated);
+  }
+
   async function handleDeleteRaid() {
     if (!confirm("Delete this raid team? This cannot be undone.")) return;
     await api.deleteRaid(raidId);
@@ -517,6 +523,13 @@ export function RaidBuilderPage() {
               className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:opacity-60"
             >
               {exporting ? "Exporting…" : "Export as image"}
+            </button>
+            <button
+              onClick={handleClearBoard}
+              disabled={totalAssigned === 0 && board.partyNames.every((n) => !n)}
+              className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-danger hover:text-danger disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Clear all
             </button>
             <button
               onClick={handleDeleteRaid}

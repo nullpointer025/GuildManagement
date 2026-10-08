@@ -103,6 +103,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ board, role }),
     }),
+  clearBoard: (id: number, board: RaidBoardKey) =>
+    request<{ raid: RaidDetail }>(`/raids/${id}/clear`, { method: "POST", body: JSON.stringify({ board }) }),
   autoAssignParties: (id: number, board: RaidBoardKey) =>
     request<AutoAssignPartiesResult>(`/raids/${id}/auto-assign-parties`, {
       method: "POST",

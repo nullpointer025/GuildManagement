@@ -204,16 +204,26 @@ export function PermaPartiesModal({ players, boards, boardOptions, defaultBoard,
     }
   }
 
-  // The party this perma party already sits in on the board (all active members
-  // together), else the first empty party no other selection has claimed, else the
-  // first unclaimed party at all.
-  function defaultTarget(id: number, forBoard: RaidBoardKey, claimed: Set<number>) {
-    const parties = boards[forBoard]?.parties ?? [];
-    const active = permaParties.find((pp) => pp.id === id)?.members.filter((m) => m.active === 1) ?? [];
-    const current = parties.findIndex(
-      (party) => active.length > 0 && active.every((m) => party.some((p) => p?.id === m.id))
+  // Where each perma party's members are already deployed in this raid, on any board,
+  // e.g. ["Main · Party 3"]. A deployed perma party can't be applied again.
+  const deployments = useMemo(() => {
+    const placedAt = new Map<number, string>();
+    for (const b of boardOptions) {
+      boards[b.key]?.parties.forEach((members, partyIndex) => {
+        for (const m of members) if (m) placedAt.set(m.id, `${b.label} · Party ${partyIndex + 1}`);
+      });
+    }
+    return new Map(
+      permaParties.map((pp) => [
+        pp.id,
+        [...new Set(pp.members.map((m) => placedAt.get(m.id)).filter((at): at is string => at != null))],
+      ])
     );
-    if (current !== -1 && !claimed.has(current)) return current;
+  }, [boards, boardOptions, permaParties]);
+
+  // The first empty party no other selection has claimed, else the first unclaimed party at all.
+  function defaultTarget(forBoard: RaidBoardKey, claimed: Set<number>) {
+    const parties = boards[forBoard]?.parties ?? [];
     const free = parties.map((_, i) => i).filter((i) => !claimed.has(i));
     return free.find((i) => parties[i].every((m) => m == null)) ?? free[0] ?? 0;
   }
@@ -222,20 +232,21 @@ export function PermaPartiesModal({ players, boards, boardOptions, defaultBoard,
     const claimed = new Set<number>();
     const next: Record<number, number> = {};
     for (const id of ids) {
-      next[id] = defaultTarget(id, forBoard, claimed);
+      next[id] = defaultTarget(forBoard, claimed);
       claimed.add(next[id]);
     }
     return next;
   }
 
   function toggleSelected(id: number) {
+    if (deployments.get(id)?.length) return;
     const next = new Set(selected);
     if (next.has(id)) {
       next.delete(id);
       setTargets(({ [id]: _dropped, ...rest }) => rest);
     } else {
       next.add(id);
-      setTargets((prev) => ({ ...prev, [id]: defaultTarget(id, board, new Set(Object.values(prev))) }));
+      setTargets((prev) => ({ ...prev, [id]: defaultTarget(board, new Set(Object.values(prev))) }));
     }
     setSelected(next);
   }
@@ -257,10 +268,9 @@ export function PermaPartiesModal({ players, boards, boardOptions, defaultBoard,
       const assignments = permaParties
         .filter((pp) => selected.has(pp.id))
         .map((pp) => ({ permaPartyId: pp.id, partyIndex: targets[pp.id] }));
-      const { skipped, alreadyPlaced } = await onApply(board, assignments);
-      const placed = assignments.length - alreadyPlaced.length;
+      const { skipped } = await onApply(board, assignments);
+      const placed = assignments.length;
       const parts = [`Applied ${placed} perma part${placed === 1 ? "y" : "ies"} to ${boardLabel(board)}.`];
-      if (alreadyPlaced.length) parts.push(`Already there: ${alreadyPlaced.join(", ")}.`);
       if (skipped.length) parts.push(`Skipped (not in latest roster): ${skipped.join(", ")}.`);
       setNotice(parts.join(" "));
       setSelected(new Set());
@@ -406,76 +416,87 @@ export function PermaPartiesModal({ players, boards, boardOptions, defaultBoard,
                   No perma parties yet. Create one to reuse it in any raid.
                 </p>
               )}
-              {permaParties.map((pp) => (
-                <div
-                  key={pp.id}
-                  className={[
-                    "flex items-start gap-3 rounded-xl border p-3 transition-colors",
-                    selected.has(pp.id) ? "border-gold/60 bg-gold/5" : "border-border-soft bg-panel-alt",
-                  ].join(" ")}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selected.has(pp.id)}
-                    onChange={() => toggleSelected(pp.id)}
-                    aria-label={`Select ${pp.name}`}
-                    className="mt-1 h-4 w-4 shrink-0 accent-[#d9a441]"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <button
-                      type="button"
-                      onClick={() => toggleSelected(pp.id)}
-                      className="text-left text-base font-semibold text-heading"
-                    >
-                      {pp.name} <span className="text-sm font-normal text-ink-dim">({pp.members.length}/5)</span>
-                    </button>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {pp.members.map((m) => (
-                        <MemberChip key={m.id} player={m} />
-                      ))}
+              {permaParties.map((pp) => {
+                const deployedAt = deployments.get(pp.id) ?? [];
+                const deployed = deployedAt.length > 0;
+                return (
+                  <div
+                    key={pp.id}
+                    className={[
+                      "flex items-start gap-3 rounded-xl border p-3 transition-colors",
+                      selected.has(pp.id) ? "border-gold/60 bg-gold/5" : "border-border-soft bg-panel-alt",
+                      deployed ? "opacity-70" : "",
+                    ].join(" ")}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected.has(pp.id)}
+                      onChange={() => toggleSelected(pp.id)}
+                      disabled={deployed}
+                      aria-label={`Select ${pp.name}`}
+                      title={deployed ? "Already deployed in this raid" : undefined}
+                      className="mt-1 h-4 w-4 shrink-0 accent-[#d9a441] disabled:cursor-not-allowed"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <button
+                        type="button"
+                        onClick={() => toggleSelected(pp.id)}
+                        disabled={deployed}
+                        className="text-left text-base font-semibold text-heading disabled:cursor-not-allowed"
+                      >
+                        {pp.name} <span className="text-sm font-normal text-ink-dim">({pp.members.length}/5)</span>
+                      </button>
+                      {deployed && (
+                        <p className="mt-1 text-sm text-gold">Deployed on {deployedAt.join(", ")}</p>
+                      )}
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {pp.members.map((m) => (
+                          <MemberChip key={m.id} player={m} />
+                        ))}
+                      </div>
+                      {selected.has(pp.id) && (
+                        <TargetPicker
+                          value={targets[pp.id] ?? 0}
+                          parties={boardParties}
+                          names={boardNames}
+                          permaParty={pp}
+                          clash={targetList.filter((t) => t === targets[pp.id]).length > 1}
+                          onChange={(partyIndex) => setTargets((prev) => ({ ...prev, [pp.id]: partyIndex }))}
+                        />
+                      )}
                     </div>
-                    {selected.has(pp.id) && (
-                      <TargetPicker
-                        value={targets[pp.id] ?? 0}
-                        parties={boardParties}
-                        names={boardNames}
-                        permaParty={pp}
-                        clash={targetList.filter((t) => t === targets[pp.id]).length > 1}
-                        onChange={(partyIndex) => setTargets((prev) => ({ ...prev, [pp.id]: partyIndex }))}
-                      />
-                    )}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => startDraft(pp)}
-                      className="rounded-lg border border-border px-3 py-1 text-sm text-ink-dim hover:border-gold hover:text-gold"
-                    >
-                      Edit
-                    </button>
-                    {confirmDeleteId === pp.id ? (
+                    <div className="flex shrink-0 items-center gap-1.5">
                       <button
                         type="button"
-                        onClick={() => deleteParty(pp.id)}
-                        onBlur={() => setConfirmDeleteId(null)}
-                        disabled={busy}
-                        autoFocus
-                        className="rounded-lg border border-danger bg-danger/15 px-3 py-1 text-sm text-danger"
+                        onClick={() => startDraft(pp)}
+                        className="rounded-lg border border-border px-3 py-1 text-sm text-ink-dim hover:border-gold hover:text-gold"
                       >
-                        Confirm delete
+                        Edit
                       </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDeleteId(pp.id)}
-                        className="rounded-lg border border-border px-3 py-1 text-sm text-ink-dim hover:border-danger hover:text-danger"
-                      >
-                        Delete
-                      </button>
-                    )}
+                      {confirmDeleteId === pp.id ? (
+                        <button
+                          type="button"
+                          onClick={() => deleteParty(pp.id)}
+                          onBlur={() => setConfirmDeleteId(null)}
+                          disabled={busy}
+                          autoFocus
+                          className="rounded-lg border border-danger bg-danger/15 px-3 py-1 text-sm text-danger"
+                        >
+                          Confirm delete
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteId(pp.id)}
+                          className="rounded-lg border border-border px-3 py-1 text-sm text-ink-dim hover:border-danger hover:text-danger"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               <button
                 type="button"
                 onClick={() => startDraft()}
