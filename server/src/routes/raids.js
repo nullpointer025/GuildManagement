@@ -375,7 +375,32 @@ function normalizeClass(className) {
 const AUTO_ASSIGN_ROLES = {
   priest: (className) => normalizeClass(className).includes("priest"),
   clown_gypsy: (className) => /clown|gypsy/.test(normalizeClass(className)),
+  creator: (className) => normalizeClass(className).includes("creator"),
 };
+
+const ROLE_LABELS = { priest: "High Priest", clown_gypsy: "Clown/Gypsy", creator: "Creator" };
+
+// The supports every party gets from "Auto assign parties"; the other slots go to DPS.
+const PARTY_SUPPORTS = ["priest", "clown_gypsy", "creator"];
+const PARTY_DPS = 2;
+
+function isSupport(className) {
+  return PARTY_SUPPORTS.some((role) => AUTO_ASSIGN_ROLES[role](className));
+}
+
+// Free players, best gear first: active, not placed anywhere in this raid, and not in a
+// perma party (same rule as the builder's pool).
+function freePlayers(raidId) {
+  return db
+    .prepare(
+      `SELECT id, class FROM players
+       WHERE active = 1
+         AND id NOT IN (SELECT player_id FROM raid_slots WHERE raid_id = ? AND player_id IS NOT NULL)
+         AND id NOT IN (SELECT player_id FROM perma_party_members)
+       ORDER BY gear_score IS NULL, gear_score DESC, ign COLLATE NOCASE`
+    )
+    .all(raidId);
+}
 
 // Gives every party on one board that has no player of the role yet the best-geared free
 // player of that role, in its first empty slot. Free means active, not placed anywhere in
@@ -391,16 +416,7 @@ raidsRouter.post("/:id/auto-assign", (req, res) => {
   if (!Object.hasOwn(AUTO_ASSIGN_ROLES, role)) return res.status(400).json({ error: "Invalid role" });
   const hasRole = AUTO_ASSIGN_ROLES[role];
 
-  const candidates = db
-    .prepare(
-      `SELECT id, class FROM players
-       WHERE active = 1
-         AND id NOT IN (SELECT player_id FROM raid_slots WHERE raid_id = ? AND player_id IS NOT NULL)
-         AND id NOT IN (SELECT player_id FROM perma_party_members)
-       ORDER BY gear_score IS NULL, gear_score DESC, ign COLLATE NOCASE`
-    )
-    .all(raidId)
-    .filter((p) => hasRole(p.class));
+  const candidates = freePlayers(raidId).filter((p) => hasRole(p.class));
 
   const { parties } = getRaidWithSlots(raidId).boards[board];
   const setSlot = db.prepare(
@@ -424,6 +440,77 @@ raidsRouter.post("/:id/auto-assign", (req, res) => {
   })();
 
   res.json({ raid: getRaidWithSlots(raidId), assigned, full, noneLeft });
+});
+
+// Fills the empty slots of every party on one board toward a full lineup: one High
+// Priest, one Clown/Gypsy, one Creator, and two DPS of different classes (any non-support
+// class). Players already seated count toward their party's lineup and are never moved.
+// Each role is handed out across all parties before the next, so the best-geared players
+// spread over the parties instead of piling into the first one.
+raidsRouter.post("/:id/auto-assign-parties", (req, res) => {
+  const raidId = Number(req.params.id);
+  const raid = db.prepare("SELECT * FROM raids WHERE id = ?").get(raidId);
+  if (!raid) return res.status(404).json({ error: "Raid not found" });
+
+  const { board } = req.body ?? {};
+  if (!isValidBoard(raid, board)) return res.status(400).json({ error: "Invalid board" });
+
+  const free = freePlayers(raidId);
+  const parties = getRaidWithSlots(raidId).boards[board].parties.map((members) => [...members]);
+  const setSlot = db.prepare(
+    "UPDATE raid_slots SET player_id = ? WHERE raid_id = ? AND board = ? AND party_index = ? AND slot_index = ?"
+  );
+
+  let assigned = 0;
+  // Seats the first free player passing `fits` in the party's first empty slot.
+  function seat(partyIndex, fits) {
+    const members = parties[partyIndex];
+    const slot = members.findIndex((m) => m == null);
+    if (slot === -1) return false;
+    const pick = free.findIndex((p) => fits(p.class));
+    if (pick === -1) return false;
+    const [player] = free.splice(pick, 1);
+    members[slot] = player;
+    setSlot.run(player.id, raidId, board, partyIndex, slot);
+    assigned++;
+    return true;
+  }
+  const dpsClasses = (members) =>
+    new Set(members.filter((m) => m && !isSupport(m.class)).map((m) => normalizeClass(m.class)));
+
+  transaction(() => {
+    for (const role of PARTY_SUPPORTS) {
+      const hasRole = AUTO_ASSIGN_ROLES[role];
+      parties.forEach((members, partyIndex) => {
+        if (!members.some((m) => m && hasRole(m.class))) seat(partyIndex, hasRole);
+      });
+    }
+    for (let round = 0; round < PARTY_DPS; round++) {
+      parties.forEach((members, partyIndex) => {
+        const taken = dpsClasses(members);
+        if (taken.size >= PARTY_DPS) return;
+        seat(
+          partyIndex,
+          (className) => className && !isSupport(className) && !taken.has(normalizeClass(className))
+        );
+      });
+    }
+    if (assigned > 0) db.prepare("UPDATE raids SET updated_at = datetime('now') WHERE id = ?").run(raidId);
+  })();
+
+  // What each party is still short of, for the officer to fill by hand.
+  const incomplete = parties
+    .map((members, partyIndex) => {
+      const missing = PARTY_SUPPORTS.filter((role) => !members.some((m) => m && AUTO_ASSIGN_ROLES[role](m.class))).map(
+        (role) => ROLE_LABELS[role]
+      );
+      const dpsShort = PARTY_DPS - Math.min(PARTY_DPS, dpsClasses(members).size);
+      if (dpsShort > 0) missing.push(`${dpsShort} DPS`);
+      return { party: partyIndex + 1, missing };
+    })
+    .filter((p) => p.missing.length > 0);
+
+  res.json({ raid: getRaidWithSlots(raidId), assigned, incomplete });
 });
 
 // Set (or clear, with an empty/omitted name) a party's custom display name on one board.

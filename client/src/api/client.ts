@@ -1,5 +1,6 @@
 import type {
   ApplyPermaPartiesResult,
+  AutoAssignPartiesResult,
   AutoAssignResult,
   AutoAssignRole,
   DiscordSyncSummary,
@@ -101,6 +102,11 @@ export const api = {
     request<AutoAssignResult>(`/raids/${id}/auto-assign`, {
       method: "POST",
       body: JSON.stringify({ board, role }),
+    }),
+  autoAssignParties: (id: number, board: RaidBoardKey) =>
+    request<AutoAssignPartiesResult>(`/raids/${id}/auto-assign-parties`, {
+      method: "POST",
+      body: JSON.stringify({ board }),
     }),
 
   permaParties: () => request<{ permaParties: PermaParty[] }>("/perma-parties"),

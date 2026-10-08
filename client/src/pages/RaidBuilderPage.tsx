@@ -20,6 +20,7 @@ import { PlayerPickerModal } from "../components/PlayerPickerModal";
 import { NotesModal } from "../components/NotesModal";
 import { PermaPartiesModal } from "../components/PermaPartiesModal";
 import { ClassCounter } from "../components/ClassCounter";
+import { ActionsModal, type RaidAction } from "../components/ActionsModal";
 import { RAID_TYPE_BOARDS, boardLabel } from "../lib/raidTypes";
 
 type SortKey = "gear_score" | "level" | "ign" | "class";
@@ -28,6 +29,20 @@ const AUTO_ASSIGN_LABELS: Record<AutoAssignRole, { one: string; many: string }> 
   priest: { one: "priest", many: "priests" },
   clown_gypsy: { one: "clown/gypsy", many: "clowns/gypsies" },
 };
+
+const RAID_ACTIONS: RaidAction[] = [
+  {
+    key: "parties",
+    label: "Auto assign parties",
+    description: "Fill each party with a High Priest, Clown/Gypsy, Creator and 2 DPS of different classes.",
+  },
+  { key: "priest", label: "Auto assign priest", description: "Give every party without a priest the best free one." },
+  {
+    key: "clown_gypsy",
+    label: "Auto assign clown/gypsy",
+    description: "Give every party without a clown or gypsy the best free one.",
+  },
+];
 
 export function RaidBuilderPage() {
   const { id } = useParams();
@@ -53,7 +68,8 @@ export function RaidBuilderPage() {
   const [savingNotes, setSavingNotes] = useState(false);
   const [notesUnseen, setNotesUnseen] = useState(false);
   const [permaOpen, setPermaOpen] = useState(false);
-  const [assigningRole, setAssigningRole] = useState<AutoAssignRole | null>(null);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [runningAction, setRunningAction] = useState<string | null>(null);
   const [autoAssignNotice, setAutoAssignNotice] = useState<string | null>(null);
   // Everyone in a perma party — kept out of the pool, since they're placed by
   // applying their perma party rather than one by one.
@@ -288,20 +304,34 @@ export function RaidBuilderPage() {
     return result;
   }
 
-  async function handleAutoAssign(role: AutoAssignRole) {
+  async function autoAssignRole(role: AutoAssignRole) {
     const label = AUTO_ASSIGN_LABELS[role];
-    setAssigningRole(role);
+    const { raid: updated, assigned, full, noneLeft } = await api.autoAssign(raidId, activeBoard, role);
+    setRaid(updated);
+    const parts = [`Assigned ${assigned} ${assigned === 1 ? label.one : label.many} on ${boardLabel(activeBoard)}.`];
+    if (noneLeft.length) parts.push(`No free ${label.one} left for part${noneLeft.length === 1 ? "y" : "ies"} ${noneLeft.join(", ")}.`);
+    if (full.length) parts.push(`Full, skipped: part${full.length === 1 ? "y" : "ies"} ${full.join(", ")}.`);
+    return parts.join(" ");
+  }
+
+  async function autoAssignParties() {
+    const { raid: updated, assigned, incomplete } = await api.autoAssignParties(raidId, activeBoard);
+    setRaid(updated);
+    const parts = [`Assigned ${assigned} player${assigned === 1 ? "" : "s"} on ${boardLabel(activeBoard)}.`];
+    if (incomplete.length) {
+      parts.push(`Still missing — ${incomplete.map((p) => `party ${p.party}: ${p.missing.join(", ")}`).join("; ")}.`);
+    }
+    return parts.join(" ");
+  }
+
+  async function handleAction(key: string) {
+    setRunningAction(key);
     try {
-      const { raid: updated, assigned, full, noneLeft } = await api.autoAssign(raidId, activeBoard, role);
-      setRaid(updated);
-      const parts = [`Assigned ${assigned} ${assigned === 1 ? label.one : label.many} on ${boardLabel(activeBoard)}.`];
-      if (noneLeft.length) parts.push(`No free ${label.one} left for part${noneLeft.length === 1 ? "y" : "ies"} ${noneLeft.join(", ")}.`);
-      if (full.length) parts.push(`Full, skipped: part${full.length === 1 ? "y" : "ies"} ${full.join(", ")}.`);
-      setAutoAssignNotice(parts.join(" "));
+      setAutoAssignNotice(key === "parties" ? await autoAssignParties() : await autoAssignRole(key as AutoAssignRole));
     } catch (err) {
-      setAutoAssignNotice(err instanceof Error ? err.message : `Couldn't auto assign ${label.many}`);
+      setAutoAssignNotice(err instanceof Error ? err.message : "Couldn't auto assign");
     } finally {
-      setAssigningRole(null);
+      setRunningAction(null);
     }
   }
 
@@ -456,16 +486,12 @@ export function RaidBuilderPage() {
                 className="w-14 rounded-md border border-transparent bg-panel-alt px-2 py-1 text-center text-sm text-ink outline-none focus:border-gold"
               />
             </div>
-            {(Object.keys(AUTO_ASSIGN_LABELS) as AutoAssignRole[]).map((role) => (
-              <button
-                key={role}
-                onClick={() => handleAutoAssign(role)}
-                disabled={assigningRole != null}
-                className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {assigningRole === role ? "Assigning…" : `Auto assign ${AUTO_ASSIGN_LABELS[role].one}`}
-              </button>
-            ))}
+            <button
+              onClick={() => setActionsOpen(true)}
+              className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold"
+            >
+              Actions
+            </button>
             <button
               onClick={() => setPermaOpen(true)}
               className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold"
@@ -571,6 +597,17 @@ export function RaidBuilderPage() {
           players={pool}
           onSelect={handlePickPlayer}
           onClose={() => setPickerTarget(null)}
+        />
+      )}
+
+      {actionsOpen && (
+        <ActionsModal
+          boardLabel={boardLabel(activeBoard)}
+          actions={RAID_ACTIONS}
+          running={runningAction}
+          notice={autoAssignNotice}
+          onRun={handleAction}
+          onClose={() => setActionsOpen(false)}
         />
       )}
 

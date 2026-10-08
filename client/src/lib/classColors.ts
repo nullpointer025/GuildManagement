@@ -12,6 +12,7 @@ const CLASS_COLORS: Record<string, string> = {
   clown: "#ec4899",
   gypsy: "#ec4899",
   clowngypsy: "#ec4899",
+  creator: "#d4d4d8",
 };
 
 const DEFAULT_COLOR = "#7a8399";

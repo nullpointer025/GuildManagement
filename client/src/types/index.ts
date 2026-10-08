@@ -134,6 +134,13 @@ export interface AutoAssignResult {
   noneLeft: number[];
 }
 
+// Parties (1-based) that auto-assign couldn't complete, with what each still lacks.
+export interface AutoAssignPartiesResult {
+  raid: RaidDetail;
+  assigned: number;
+  incomplete: { party: number; missing: string[] }[];
+}
+
 export interface DiscordSyncSummary {
   matched: number;
   missing: number;
