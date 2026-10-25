@@ -1,17 +1,14 @@
 import { Router } from "express";
-import multer from "multer";
 import { db, transaction } from "../db.js";
 import { requireAccess } from "../auth.js";
 import { parseLeagueCsv, parseLeagueRows, parseStat } from "../leagueImport.js";
-import { readBattleRecordImages } from "../leagueOcr.js";
 import { createRosterMatcher } from "../nameMatch.js";
 
 export const leaguesRouter = Router();
 leaguesRouter.use(requireAccess);
 
 const RESULTS = ["victory", "defeat"];
-const MAX_SCREENSHOTS = 20;
-const upload = multer({ limits: { fileSize: 10 * 1024 * 1024, files: MAX_SCREENSHOTS } });
+const MAX_OCR_ROWS = 2000;
 
 function optionalCount(value) {
   if (value == null || value === "") return { ok: true, value: null };
@@ -21,8 +18,8 @@ function optionalCount(value) {
 
 // Suggests the roster player for each parsed row. Nothing is saved — the officer
 // reviews and corrects the rows first.
-function previewRows(rows) {
-  const matchPlayer = createRosterMatcher(db.prepare("SELECT id, ign, active FROM players").all());
+async function previewRows(rows) {
+  const matchPlayer = createRosterMatcher(await db.all("SELECT id, ign, active FROM players"));
   return rows.map((r) => ({
     ign: r.ign,
     kills: r.kills,
@@ -35,43 +32,31 @@ function previewRows(rows) {
 }
 
 // Parses a pasted/uploaded battle-record CSV.
-leaguesRouter.post("/preview", (req, res) => {
+leaguesRouter.post("/preview", async (req, res) => {
   let rows;
   try {
     rows = parseLeagueCsv(req.body?.csv);
   } catch (err) {
     return res.status(400).json({ error: err.message || "Couldn't read the CSV" });
   }
-  res.json({ rows: previewRows(rows) });
+  res.json({ rows: await previewRows(rows) });
 });
 
-// Reads the battle-record screenshots with OCR, in upload order.
-leaguesRouter.post("/preview-images", (req, res, next) => {
-  upload.array("images", MAX_SCREENSHOTS)(req, res, async (err) => {
-    if (err) {
-      const tooMany = err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE";
-      return res.status(400).json({
-        error: tooMany ? `Upload at most ${MAX_SCREENSHOTS} screenshots` : err.code === "LIMIT_FILE_SIZE" ? "Each screenshot must be under 10 MB" : "Couldn't upload the screenshots",
-      });
-    }
-    const files = req.files ?? [];
-    if (files.length === 0) return res.status(400).json({ error: "Add at least one screenshot" });
-    if (files.some((f) => !/^image\/(png|jpeg|webp)$/.test(f.mimetype))) {
-      return res.status(400).json({ error: "Screenshots must be PNG, JPG or WebP images" });
-    }
-    try {
-      const rows = parseLeagueRows(await readBattleRecordImages(files.map((f) => f.buffer)));
-      if (rows.length === 0) {
-        return res.status(400).json({ error: "No player rows found in the screenshots — try sharper, uncropped screenshots or use the CSV instead" });
-      }
-      res.json({ rows: previewRows(rows) });
-    } catch (e) {
-      next(e);
-    }
-  });
+// Takes the raw rows the browser read from the battle-record screenshots with OCR
+// (see client/src/lib/leagueOcr.ts) and matches them to the roster.
+leaguesRouter.post("/preview-ocr", async (req, res) => {
+  const raw = req.body?.rows;
+  if (!Array.isArray(raw) || raw.length > MAX_OCR_ROWS) {
+    return res.status(400).json({ error: "Couldn't read the screenshots" });
+  }
+  const rows = parseLeagueRows(raw.filter((r) => r && typeof r === "object"));
+  if (rows.length === 0) {
+    return res.status(400).json({ error: "No player rows found in the screenshots — try sharper, uncropped screenshots or use the CSV instead" });
+  }
+  res.json({ rows: await previewRows(rows) });
 });
 
-leaguesRouter.post("/", (req, res) => {
+leaguesRouter.post("/", async (req, res) => {
   const body = req.body ?? {};
   if (typeof body.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.date)) {
     return res.status(400).json({ error: "Pick the league date" });
@@ -85,11 +70,11 @@ leaguesRouter.post("/", (req, res) => {
 
   const rows = Array.isArray(body.rows) ? body.rows : [];
   if (rows.length === 0) return res.status(400).json({ error: "No players to save" });
-  const findPlayer = db.prepare("SELECT id FROM players WHERE id = ?");
+  const known = new Set((await db.all("SELECT id FROM players")).map((p) => p.id));
   const parsed = [];
   for (const r of rows) {
     const ign = typeof r?.ign === "string" ? r.ign.trim() : "";
-    if (!Number.isInteger(r?.playerId) || !findPlayer.get(r.playerId)) {
+    if (!Number.isInteger(r?.playerId) || !known.has(r.playerId)) {
       return res.status(400).json({ error: `Pick a roster player for "${ign || "?"}"` });
     }
     const stats = ["kills", "assists", "playerDamage", "buildingDamage"].map((k) => parseStat(r[k]));
@@ -100,48 +85,58 @@ leaguesRouter.post("/", (req, res) => {
     return res.status(400).json({ error: "The same roster player is picked for two rows" });
   }
 
-  const id = transaction(() => {
-    const info = db
-      .prepare("INSERT INTO guild_leagues (date, result, participants, total_kills, towers) VALUES (?, ?, ?, ?, ?)")
-      .run(body.date, result, ...counts.map((c) => c.value));
-    const insert = db.prepare(
-      `INSERT INTO guild_league_stats (league_id, player_id, ign, kills, assists, player_damage, building_damage)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+  const id = await transaction(async () => {
+    const info = await db.run(
+      "INSERT INTO guild_leagues (date, result, participants, total_kills, towers) VALUES (?, ?, ?, ?, ?) RETURNING id",
+      body.date,
+      result,
+      ...counts.map((c) => c.value)
     );
-    for (const p of parsed) insert.run(info.lastInsertRowid, p.playerId, p.ign, ...p.stats);
-    return info.lastInsertRowid;
-  })();
+    const stats = parsed.map((p) => {
+      const [kills, assists, player_damage, building_damage] = p.stats;
+      return { player_id: p.playerId, ign: p.ign, kills, assists, player_damage, building_damage };
+    });
+    await db.run(
+      `INSERT INTO guild_league_stats (league_id, player_id, ign, kills, assists, player_damage, building_damage)
+       SELECT ?::bigint, player_id, ign, kills, assists, player_damage, building_damage
+       FROM jsonb_to_recordset(?::text::jsonb) AS r(
+         player_id bigint, ign text, kills bigint, assists bigint, player_damage bigint, building_damage bigint
+       )`,
+      info.id,
+      JSON.stringify(stats)
+    );
+    return info.id;
+  });
 
   res.status(201).json({ id });
 });
 
-leaguesRouter.get("/", (req, res) => {
-  const leagues = db
-    .prepare(
-      `SELECT l.*, COUNT(s.player_id) AS recorded
-       FROM guild_leagues l LEFT JOIN guild_league_stats s ON s.league_id = l.id
-       GROUP BY l.id ORDER BY l.date DESC, l.id DESC`
-    )
-    .all();
+leaguesRouter.get("/", async (req, res) => {
+  const leagues = await db.all(
+    `SELECT l.*, COUNT(s.player_id) AS recorded
+     FROM guild_leagues l LEFT JOIN guild_league_stats s ON s.league_id = l.id
+     GROUP BY l.id ORDER BY l.date DESC, l.id DESC`
+  );
   res.json({ leagues });
 });
 
 // Per-player attendance and stats across every recorded league. Covers everyone
 // still in the guild, plus anyone who has left but has league history.
-leaguesRouter.get("/tracker", (req, res) => {
-  const leagues = db.prepare("SELECT id, date FROM guild_leagues ORDER BY date DESC, id DESC").all();
+leaguesRouter.get("/tracker", async (req, res) => {
+  const [leagues, stats, allPlayers] = await Promise.all([
+    db.all("SELECT id, date FROM guild_leagues ORDER BY date DESC, id DESC"),
+    db.all("SELECT * FROM guild_league_stats"),
+    db.all("SELECT id, ign, class, active FROM players"),
+  ]);
   const dateOf = new Map(leagues.map((l) => [l.id, l.date]));
   const order = new Map(leagues.map((l, i) => [l.id, i]));
-  const stats = db.prepare("SELECT * FROM guild_league_stats").all();
   const byPlayer = new Map();
   for (const s of stats) {
     if (!byPlayer.has(s.player_id)) byPlayer.set(s.player_id, []);
     byPlayer.get(s.player_id).push(s);
   }
 
-  const players = db
-    .prepare("SELECT id, ign, class, active FROM players")
-    .all()
+  const players = allPlayers
     .filter((p) => p.active === 1 || byPlayer.has(p.id))
     .map((p) => {
       const history = (byPlayer.get(p.id) ?? [])
@@ -174,22 +169,22 @@ leaguesRouter.get("/tracker", (req, res) => {
   res.json({ leagueCount: leagues.length, players });
 });
 
-leaguesRouter.get("/:id", (req, res) => {
-  const league = db.prepare("SELECT * FROM guild_leagues WHERE id = ?").get(Number(req.params.id));
+leaguesRouter.get("/:id", async (req, res) => {
+  const league = await db.get("SELECT * FROM guild_leagues WHERE id = ?", Number(req.params.id));
   if (!league) return res.status(404).json({ error: "League not found" });
-  const stats = db
-    .prepare(
-      `SELECT s.player_id AS playerId, p.ign AS rosterIgn, p.class, s.ign, s.kills, s.assists,
-              s.player_damage AS playerDamage, s.building_damage AS buildingDamage
-       FROM guild_league_stats s JOIN players p ON p.id = s.player_id
-       WHERE s.league_id = ? ORDER BY s.kills DESC`
-    )
-    .all(league.id);
+  // Postgres folds unquoted aliases to lower case, so the camelCase ones are quoted.
+  const stats = await db.all(
+    `SELECT s.player_id AS "playerId", p.ign AS "rosterIgn", p.class, s.ign, s.kills, s.assists,
+            s.player_damage AS "playerDamage", s.building_damage AS "buildingDamage"
+     FROM guild_league_stats s JOIN players p ON p.id = s.player_id
+     WHERE s.league_id = ? ORDER BY s.kills DESC`,
+    league.id
+  );
   res.json({ league: { ...league, stats } });
 });
 
-leaguesRouter.delete("/:id", (req, res) => {
-  const info = db.prepare("DELETE FROM guild_leagues WHERE id = ?").run(Number(req.params.id));
+leaguesRouter.delete("/:id", async (req, res) => {
+  const info = await db.run("DELETE FROM guild_leagues WHERE id = ?", Number(req.params.id));
   if (info.changes === 0) return res.status(404).json({ error: "League not found" });
   res.json({ ok: true });
 });

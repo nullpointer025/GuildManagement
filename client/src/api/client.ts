@@ -125,10 +125,11 @@ export const api = {
   leagueTracker: () => request<{ leagueCount: number; players: TrackerPlayer[] }>("/leagues/tracker"),
   previewLeague: (csv: string) =>
     request<{ rows: LeaguePreviewRow[] }>("/leagues/preview", { method: "POST", body: JSON.stringify({ csv }) }),
-  previewLeagueImages: (images: File[]) => {
-    const fd = new FormData();
-    for (const image of images) fd.append("images", image);
-    return request<{ rows: LeaguePreviewRow[] }>("/leagues/preview-images", { method: "POST", body: fd });
+  // OCR runs in the browser (loaded on demand, it's large); only the text rows are sent.
+  previewLeagueImages: async (images: File[]) => {
+    const { readBattleRecordImages } = await import("../lib/leagueOcr");
+    const rows = await readBattleRecordImages(images);
+    return request<{ rows: LeaguePreviewRow[] }>("/leagues/preview-ocr", { method: "POST", body: JSON.stringify({ rows }) });
   },
   saveLeague: (payload: {
     date: string;

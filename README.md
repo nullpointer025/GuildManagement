@@ -9,12 +9,12 @@ A small web app for running a game guild: import the roster CSV export, keep a s
 
 ## Stack
 
-- `server/` — Node.js + Express, using Node's built-in `node:sqlite` (no native build step) for storage, JWT cookie sessions, and CSV parsing/merge logic.
+- `server/` — Node.js + Express on Supabase Postgres (via the `postgres` driver), JWT cookie sessions, and CSV parsing/merge logic. Deployed to Vercel as a serverless function (`api/index.js`).
 - `client/` — React + Vite + TypeScript, Tailwind CSS for styling, `@dnd-kit` for the drag-and-drop board.
 
 ## Local development
 
-Requires Node.js 22.5+ (uses the built-in `node:sqlite` module — Node 24 is what this was built/tested with). This is an npm workspaces monorepo, so a single install at the repo root sets up both `server/` and `client/`:
+Requires Node.js 22+ and a Supabase project (the free plan is fine). This is an npm workspaces monorepo, so a single install at the repo root sets up both `server/` and `client/`:
 
 ```bash
 npm install
@@ -24,6 +24,9 @@ Copy `server/.env.example` to `server/.env` and fill in:
 
 - `JWT_SECRET` — long random string (`node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`)
 - `GUILD_INVITE_CODE` — the single shared code officers enter to get in
+- `DATABASE_URL` — Supabase → **Connect** → *Transaction pooler* connection string (port 6543), with your database password filled in
+
+Create the tables once by pasting `supabase/migrations/20261025000000_init.sql` into the Supabase SQL editor and running it.
 
 Then, in two terminals:
 
@@ -38,31 +41,34 @@ Open http://localhost:5173, enter your invite code, and import a CSV from the Ro
 
 Expects the export's header row to include at least a `Player` column (the IGN). It also reads `Lv.`, `Class`, `Title`, `Gender`, `Position`, `Gear Score`, `Weekly`, `Weekly Contribution`, `Total Contribution`, and `Online Status` when present — matching the game's own export format.
 
-## Deploying so other officers can reach it over HTTPS
+## Deploying (Vercel + Supabase)
 
-The server serves the built client itself, so the whole app is one Node process — no separate frontend host needed. It's a plain `npm install && npm run build && npm start` at the repo root (npm workspaces), so it deploys cleanly to any zero-config Node host.
+Vercel serves the built client as static files and runs the API (`server/src/app.js`) as one serverless function, configured in `vercel.json`. Data lives in Supabase Postgres. Battle-record screenshots are read with OCR in the browser, so nothing large is ever uploaded.
 
-This app is **not** a fit for Vercel: Vercel's hosting is serverless (stateless functions, filesystem reset on every deploy), and this app keeps its data in a local SQLite file that needs to persist on disk between requests. Use a host that runs a real, persistent Node process instead — [Railway](https://railway.app) is the easiest for this project. Steps:
-
-1. **Push the repo to GitHub.** Create an empty repo at github.com/new, then from the repo root:
-   ```bash
-   git add -A
-   git commit -m "Initial commit"
-   git branch -M main
-   git remote add origin https://github.com/<you>/<repo>.git
-   git push -u origin main
-   ```
-2. **Create a Railway project** → "Deploy from GitHub repo" → pick this repo. Railway detects Node automatically (via Nixpacks) and runs `npm install`, `npm run build`, `npm start` at the repo root — no config needed.
-3. **Add a persistent volume** (Railway dashboard → your service → Settings → Volumes): mount it at `/data`. Then set the environment variable `DATA_DIR=/data` so the SQLite file lives on that volume instead of the container's throwaway disk.
-4. **Set environment variables** on the service (Settings → Variables):
+1. **Supabase:** create a project, then run `supabase/migrations/20261025000000_init.sql` in the SQL editor. Copy the *Transaction pooler* connection string from **Connect**.
+2. **Vercel:** "Add New → Project", import this GitHub repo, keep the root directory as the repo root (`vercel.json` sets the build). Add the environment variables:
+   - `DATABASE_URL` — the pooler connection string from step 1
+   - `JWT_SECRET` — long random string
+   - `GUILD_INVITE_CODE` — the shared code for officers
    - `NODE_ENV=production`
-   - `JWT_SECRET` — long random string (`node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`)
-   - `GUILD_INVITE_CODE` — the single shared code you'll give your officers
-   - `DATA_DIR=/data` (from step 3)
-   - Leave `PORT` unset — Railway injects it automatically and the server already reads `process.env.PORT`.
-5. **Point guildmanager.site at Railway:** in the Railway service → Settings → Networking → Custom Domain, add `guildmanager.site` (and/or `www.guildmanager.site`). Railway gives you a CNAME target. Go to your domain registrar's DNS settings and add a CNAME record for that host pointing at the value Railway gives you (for the bare root domain some registrars require an ALIAS/ANAME record instead of CNAME — Railway's dashboard tells you which to use). Railway provisions the HTTPS certificate automatically once DNS resolves.
-6. From then on, every `git push` to `main` auto-redeploys on Railway.
+   - `DISCORD_BOT_TOKEN` / `DISCORD_GUILD_ID` — optional, for the Discord sync
+3. **Domain:** Vercel project → Settings → Domains → add `guildmanager.site` and set the DNS records it shows at your registrar.
+4. Every push to `main` redeploys.
 
-Render or Fly.io work the same way if you'd rather use one of those — same idea: a persistent volume for `/data`, `DATA_DIR` pointed at it, and the same environment variables.
+`vercel.json` pins the functions to Tokyo (`hnd1`) to sit next to the Supabase database (ap-northeast-1). Change both together if you move regions.
+
+### Moving data from the old SQLite database
+
+Copy `guild.db` from the old host, then with `DATABASE_URL` set and the schema created:
+
+```bash
+node server/scripts/migrate-sqlite.js path/to/guild.db
+```
+
+It copies every table and keeps all ids. It refuses to run if the Postgres tables already contain data.
+
+### Free-plan note
+
+Supabase pauses free projects after about a week without activity. If the app hasn't been used for a while, restore the project from the Supabase dashboard.
 
 Once it's behind HTTPS, cookies are marked `secure` automatically in production, so entering the invite code only works over `https://`.

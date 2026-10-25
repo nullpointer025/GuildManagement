@@ -252,7 +252,8 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
               <div className="flex flex-col gap-3">
                 <p className="text-sm text-ink-dim">
                   Add every battle-record screenshot for this league, scrolled from top to bottom. They're read with
-                  text recognition, so check the names and numbers on the next step.
+                  text recognition in your browser, so check the names and numbers on the next step. The first time on
+                  a device it downloads the reading data, which can take a minute.
                 </p>
                 <CsvDropzone
                   onFiles={addImages}
