@@ -12,7 +12,11 @@ const CLASS_COLORS: Record<string, string> = {
   clown: "#ec4899",
   gypsy: "#ec4899",
   clowngypsy: "#ec4899",
-  creator: "#d4d4d8",
+  // Kept a shade apart from High Wizard (blue), Assassin Cross (purple) and
+  // Whitesmith (orange) so they still read as different classes on the board.
+  scholar: "#38bdf8",
+  rogue: "#7c3aed",
+  creator: "#fb923c",
 };
 
 const DEFAULT_COLOR = "#7a8399";
