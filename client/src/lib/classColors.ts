@@ -16,6 +16,7 @@ const CLASS_COLORS: Record<string, string> = {
   // Whitesmith (orange) so they still read as different classes on the board.
   scholar: "#38bdf8",
   rogue: "#7c3aed",
+  stalker: "#7c3aed",
   creator: "#fb923c",
 };
 
