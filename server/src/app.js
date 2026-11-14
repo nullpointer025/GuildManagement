@@ -8,6 +8,7 @@ import { playersRouter } from "./routes/players.js";
 import { raidsRouter } from "./routes/raids.js";
 import { permaPartiesRouter } from "./routes/permaParties.js";
 import { leaguesRouter } from "./routes/leagues.js";
+import { adminRouter } from "./routes/admin.js";
 
 // The API on its own. Vercel runs it as a serverless function (api/index.js) and
 // serves the built client itself; src/index.js runs it as a regular server.
@@ -26,6 +27,7 @@ app.use("/api/players", playersRouter);
 app.use("/api/raids", raidsRouter);
 app.use("/api/perma-parties", permaPartiesRouter);
 app.use("/api/leagues", leaguesRouter);
+app.use("/api/admin", adminRouter);
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 

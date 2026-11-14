@@ -7,6 +7,7 @@ import { RosterPage } from "./pages/RosterPage";
 import { RaidsListPage } from "./pages/RaidsListPage";
 import { RaidBuilderPage } from "./pages/RaidBuilderPage";
 import { GuildLeaguePage } from "./pages/GuildLeaguePage";
+import { AdminPage } from "./pages/AdminPage";
 
 export default function App() {
   const init = useAuthStore((s) => s.init);
@@ -18,6 +19,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/enter" element={<GatePage />} />
+      <Route path="/admin" element={<AdminPage />} />
       <Route element={<ProtectedRoute />}>
         <Route path="/roster" element={<RosterPage />} />
         <Route path="/raids" element={<RaidsListPage />} />

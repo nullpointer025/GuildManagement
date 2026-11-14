@@ -1,5 +1,5 @@
-// Reads the guild Discord server's member list through a private bot (token and
-// server ID from env). Plain REST calls — no gateway connection or discord.js.
+// Reads a guild's Discord server member list through one shared bot (token from
+// env; each guild stores its own server ID and invites the bot to that server). Plain REST calls — no gateway connection or discord.js.
 
 import { compactName, ignVariants, nameContainsIgn, normalizeName, wordsSpellName } from "./nameMatch.js";
 
@@ -14,8 +14,9 @@ export class DiscordError extends Error {
   }
 }
 
-export function discordConfigured() {
-  return Boolean(process.env.DISCORD_BOT_TOKEN && process.env.DISCORD_GUILD_ID);
+// Sync runs only for guilds that turned it on and gave their server ID.
+export function discordConfigured(guild) {
+  return Boolean(process.env.DISCORD_BOT_TOKEN && guild?.discord_sync_enabled && guild?.discord_guild_id);
 }
 
 async function discordGet(path) {
@@ -37,7 +38,7 @@ async function discordGet(path) {
         "Discord denied access — make sure the bot is in the server and Server Members Intent is turned on"
       );
     }
-    if (res.status === 404) throw new DiscordError("Discord server not found — check DISCORD_GUILD_ID");
+    if (res.status === 404) throw new DiscordError("Discord server not found — check the Discord server ID in Guild settings");
     if (!res.ok) throw new DiscordError(`Discord request failed (${res.status})`);
     return res.json();
   }
@@ -45,8 +46,7 @@ async function discordGet(path) {
 }
 
 // All non-bot members, paginated 1000 at a time (Discord's max per request).
-export async function fetchGuildMembers() {
-  const guildId = process.env.DISCORD_GUILD_ID;
+export async function fetchGuildMembers(guildId) {
   const members = [];
   let after = "0";
   for (;;) {

@@ -7,14 +7,17 @@ permaPartiesRouter.use(requireAccess);
 
 const MAX_MEMBERS = 5;
 
-async function listPermaParties() {
+async function listPermaParties(guildId) {
   const [parties, members] = await Promise.all([
-    db.all("SELECT id, name FROM perma_parties ORDER BY lower(name) ASC"),
+    db.all("SELECT id, name FROM perma_parties WHERE guild_id = ? ORDER BY lower(name) ASC", guildId),
     db.all(
       `SELECT m.perma_party_id, p.*
        FROM perma_party_members m
+       JOIN perma_parties pp ON pp.id = m.perma_party_id
        JOIN players p ON p.id = m.player_id
-       ORDER BY m.perma_party_id, m.slot_index`
+       WHERE pp.guild_id = ?
+       ORDER BY m.perma_party_id, m.slot_index`,
+      guildId
     ),
   ]);
   return parties.map((party) => ({
@@ -26,7 +29,7 @@ async function listPermaParties() {
 }
 
 // Validates a create/update body. Returns { name, playerIds } or { error }.
-async function parseBody(body, ownId = null) {
+async function parseBody(guildId, body, ownId = null) {
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   if (!name) return { error: "Perma party name is required" };
   if (name.length > 60) return { error: "Perma party name must be 60 characters or fewer" };
@@ -40,7 +43,11 @@ async function parseBody(body, ownId = null) {
   }
 
   const placeholders = playerIds.map(() => "?").join(",");
-  const found = await db.get(`SELECT COUNT(*) AS n FROM players WHERE id IN (${placeholders})`, ...playerIds);
+  const found = await db.get(
+    `SELECT COUNT(*) AS n FROM players WHERE guild_id = ? AND id IN (${placeholders})`,
+    guildId,
+    ...playerIds
+  );
   if (found.n !== playerIds.length) return { error: "Some players no longer exist" };
 
   const taken = await db.all(
@@ -72,27 +79,31 @@ async function saveMembers(partyId, playerIds) {
 }
 
 permaPartiesRouter.get("/", async (req, res) => {
-  res.json({ permaParties: await listPermaParties() });
+  res.json({ permaParties: await listPermaParties(req.guild.id) });
 });
 
 permaPartiesRouter.post("/", async (req, res) => {
-  const parsed = await parseBody(req.body);
+  const parsed = await parseBody(req.guild.id, req.body);
   if (parsed.error) return res.status(400).json({ error: parsed.error });
 
   await transaction(async () => {
-    const info = await db.run("INSERT INTO perma_parties (name) VALUES (?) RETURNING id", parsed.name);
+    const info = await db.run(
+      "INSERT INTO perma_parties (guild_id, name) VALUES (?, ?) RETURNING id",
+      req.guild.id,
+      parsed.name
+    );
     await saveMembers(info.id, parsed.playerIds);
   });
 
-  res.status(201).json({ permaParties: await listPermaParties() });
+  res.status(201).json({ permaParties: await listPermaParties(req.guild.id) });
 });
 
 permaPartiesRouter.put("/:id", async (req, res) => {
   const id = Number(req.params.id);
-  if (!(await db.get("SELECT id FROM perma_parties WHERE id = ?", id))) {
+  if (!(await db.get("SELECT id FROM perma_parties WHERE id = ? AND guild_id = ?", id, req.guild.id))) {
     return res.status(404).json({ error: "Perma party not found" });
   }
-  const parsed = await parseBody(req.body, id);
+  const parsed = await parseBody(req.guild.id, req.body, id);
   if (parsed.error) return res.status(400).json({ error: parsed.error });
 
   await transaction(async () => {
@@ -100,11 +111,15 @@ permaPartiesRouter.put("/:id", async (req, res) => {
     await saveMembers(id, parsed.playerIds);
   });
 
-  res.json({ permaParties: await listPermaParties() });
+  res.json({ permaParties: await listPermaParties(req.guild.id) });
 });
 
 permaPartiesRouter.delete("/:id", async (req, res) => {
-  const info = await db.run("DELETE FROM perma_parties WHERE id = ?", Number(req.params.id));
+  const info = await db.run(
+    "DELETE FROM perma_parties WHERE id = ? AND guild_id = ?",
+    Number(req.params.id),
+    req.guild.id
+  );
   if (info.changes === 0) return res.status(404).json({ error: "Perma party not found" });
-  res.json({ permaParties: await listPermaParties() });
+  res.json({ permaParties: await listPermaParties(req.guild.id) });
 });

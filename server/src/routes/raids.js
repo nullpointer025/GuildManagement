@@ -40,8 +40,10 @@ function isValidBoard(raid, board) {
   return boardsOf(raid).includes(board);
 }
 
-function findRaid(raidId) {
-  return db.get("SELECT * FROM raids WHERE id = ?", raidId);
+// Every raid lookup is scoped to the session's guild; once a route has found the
+// raid this way, its raid_slots/raid_parties rows (keyed by raid_id) are safe to use.
+function findRaid(guildId, raidId) {
+  return db.get("SELECT * FROM raids WHERE id = ? AND guild_id = ?", raidId, guildId);
 }
 
 function touchRaid(raidId) {
@@ -75,8 +77,8 @@ function emptyBoardShape(partyCount) {
   };
 }
 
-async function getRaidWithSlots(raidId) {
-  const raid = await findRaid(raidId);
+async function getRaidWithSlots(guildId, raidId) {
+  const raid = await findRaid(guildId, raidId);
   if (!raid) return null;
 
   const [slots, nameRows] = await Promise.all([
@@ -135,8 +137,17 @@ async function getRaidWithSlots(raidId) {
 
 raidsRouter.get("/", async (req, res) => {
   const [raids, counts] = await Promise.all([
-    db.all("SELECT id, name, type, created_at, updated_at FROM raids ORDER BY updated_at DESC"),
-    db.all("SELECT raid_id, board, COUNT(*) AS n FROM raid_parties GROUP BY raid_id, board"),
+    db.all(
+      "SELECT id, name, type, created_at, updated_at FROM raids WHERE guild_id = ? ORDER BY updated_at DESC",
+      req.guild.id
+    ),
+    db.all(
+      `SELECT rp.raid_id, rp.board, COUNT(*) AS n
+       FROM raid_parties rp JOIN raids r ON r.id = rp.raid_id
+       WHERE r.guild_id = ?
+       GROUP BY rp.raid_id, rp.board`,
+      req.guild.id
+    ),
   ]);
   const countOf = new Map(counts.map((c) => [`${c.raid_id}:${c.board}`, c.n]));
   const withCounts = raids.map((raid) => ({
@@ -161,25 +172,30 @@ raidsRouter.post("/", async (req, res) => {
   }
 
   const raidId = await transaction(async () => {
-    const info = await db.run("INSERT INTO raids (name, type) VALUES (?, ?) RETURNING id", trimmedName, type);
+    const info = await db.run(
+      "INSERT INTO raids (guild_id, name, type) VALUES (?, ?, ?) RETURNING id",
+      req.guild.id,
+      trimmedName,
+      type
+    );
     for (const board of RAID_TYPE_BOARDS[type]) {
       await addParties(info.id, board, 0, preset?.[board] ?? count);
     }
     return info.id;
   });
 
-  res.status(201).json({ raid: await getRaidWithSlots(raidId) });
+  res.status(201).json({ raid: await getRaidWithSlots(req.guild.id, raidId) });
 });
 
 raidsRouter.get("/:id", async (req, res) => {
-  const raid = await getRaidWithSlots(Number(req.params.id));
+  const raid = await getRaidWithSlots(req.guild.id, Number(req.params.id));
   if (!raid) return res.status(404).json({ error: "Raid not found" });
   res.json({ raid });
 });
 
 raidsRouter.patch("/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const existing = await findRaid(id);
+  const existing = await findRaid(req.guild.id, id);
   if (!existing) return res.status(404).json({ error: "Raid not found" });
 
   const { name } = req.body ?? {};
@@ -189,13 +205,13 @@ raidsRouter.patch("/:id", async (req, res) => {
     await db.run("UPDATE raids SET name = ?, updated_at = now_text() WHERE id = ?", trimmedName, id);
   }
 
-  res.json({ raid: await getRaidWithSlots(id) });
+  res.json({ raid: await getRaidWithSlots(req.guild.id, id) });
 });
 
 // Grow/shrink ONE board's party count. Each board is sized independently.
 raidsRouter.patch("/:id/party-count", async (req, res) => {
   const id = Number(req.params.id);
-  const raid = await findRaid(id);
+  const raid = await findRaid(req.guild.id, id);
   if (!raid) return res.status(404).json({ error: "Raid not found" });
 
   const { board, partyCount } = req.body ?? {};
@@ -215,7 +231,7 @@ raidsRouter.patch("/:id/party-count", async (req, res) => {
     await touchRaid(id);
   });
 
-  res.json({ raid: await getRaidWithSlots(id) });
+  res.json({ raid: await getRaidWithSlots(req.guild.id, id) });
 });
 
 // Shared notes for the whole raid (not per-board). notes_updated_at is tracked
@@ -223,7 +239,7 @@ raidsRouter.patch("/:id/party-count", async (req, res) => {
 // apart from routine slot/party activity, to drive an unread indicator.
 raidsRouter.patch("/:id/notes", async (req, res) => {
   const id = Number(req.params.id);
-  const raid = await findRaid(id);
+  const raid = await findRaid(req.guild.id, id);
   if (!raid) return res.status(404).json({ error: "Raid not found" });
 
   const notes = typeof req.body?.notes === "string" ? req.body.notes : "";
@@ -233,12 +249,12 @@ raidsRouter.patch("/:id/notes", async (req, res) => {
     id
   );
 
-  res.json({ raid: await getRaidWithSlots(id) });
+  res.json({ raid: await getRaidWithSlots(req.guild.id, id) });
 });
 
 raidsRouter.delete("/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const info = await db.run("DELETE FROM raids WHERE id = ?", id);
+  const info = await db.run("DELETE FROM raids WHERE id = ? AND guild_id = ?", id, req.guild.id);
   if (info.changes === 0) return res.status(404).json({ error: "Raid not found" });
   res.json({ ok: true });
 });
@@ -248,7 +264,7 @@ raidsRouter.delete("/:id", async (req, res) => {
 // across boards, nor hold two slots on the same board.
 raidsRouter.put("/:id/slots", async (req, res) => {
   const raidId = Number(req.params.id);
-  const raid = await findRaid(raidId);
+  const raid = await findRaid(req.guild.id, raidId);
   if (!raid) return res.status(404).json({ error: "Raid not found" });
 
   const { board, partyIndex, slotIndex, playerId } = req.body ?? {};
@@ -263,6 +279,13 @@ raidsRouter.put("/:id/slots", async (req, res) => {
   ) {
     return res.status(400).json({ error: "Invalid board/party/slot index" });
   }
+  if (
+    playerId != null &&
+    !(Number.isInteger(playerId) &&
+      (await db.get("SELECT id FROM players WHERE id = ? AND guild_id = ?", playerId, req.guild.id)))
+  ) {
+    return res.status(400).json({ error: "Player not found" });
+  }
 
   await transaction(async () => {
     if (playerId != null) {
@@ -272,7 +295,7 @@ raidsRouter.put("/:id/slots", async (req, res) => {
     await touchRaid(raidId);
   });
 
-  res.json({ raid: await getRaidWithSlots(raidId) });
+  res.json({ raid: await getRaidWithSlots(req.guild.id, raidId) });
 });
 
 // Places perma parties into the parties the officer picked on one board, naming
@@ -282,7 +305,7 @@ raidsRouter.put("/:id/slots", async (req, res) => {
 // raid (on any board) is refused, so it can only be placed once per raid.
 raidsRouter.post("/:id/apply-perma-parties", async (req, res) => {
   const raidId = Number(req.params.id);
-  const raid = await findRaid(raidId);
+  const raid = await findRaid(req.guild.id, raidId);
   if (!raid) return res.status(404).json({ error: "Raid not found" });
 
   const { board, assignments } = req.body ?? {};
@@ -306,7 +329,11 @@ raidsRouter.post("/:id/apply-perma-parties", async (req, res) => {
   const skipped = [];
   const toPlace = [];
   for (const { permaPartyId, partyIndex } of assignments) {
-    const party = await db.get("SELECT id, name FROM perma_parties WHERE id = ?", permaPartyId);
+    const party = await db.get(
+      "SELECT id, name FROM perma_parties WHERE id = ? AND guild_id = ?",
+      permaPartyId,
+      req.guild.id
+    );
     if (!party) return res.status(400).json({ error: "Some perma parties no longer exist" });
     const members = await db.all(
       `SELECT p.id, p.ign, p.active FROM perma_party_members m
@@ -348,7 +375,7 @@ raidsRouter.post("/:id/apply-perma-parties", async (req, res) => {
     await touchRaid(raidId);
   });
 
-  res.json({ raid: await getRaidWithSlots(raidId), skipped });
+  res.json({ raid: await getRaidWithSlots(req.guild.id, raidId), skipped });
 });
 
 function normalizeClass(className) {
@@ -375,13 +402,14 @@ function isSupport(className) {
 
 // Free players, best gear first: active, not placed anywhere in this raid, and not in a
 // perma party (same rule as the builder's pool).
-function freePlayers(raidId) {
+function freePlayers(guildId, raidId) {
   return db.all(
     `SELECT id, class FROM players
-     WHERE active = 1
+     WHERE guild_id = ? AND active = 1
        AND id NOT IN (SELECT player_id FROM raid_slots WHERE raid_id = ? AND player_id IS NOT NULL)
        AND id NOT IN (SELECT player_id FROM perma_party_members)
      ORDER BY gear_score IS NULL, gear_score DESC, lower(ign)`,
+    guildId,
     raidId
   );
 }
@@ -392,7 +420,7 @@ function freePlayers(raidId) {
 // left alone.
 raidsRouter.post("/:id/auto-assign", async (req, res) => {
   const raidId = Number(req.params.id);
-  const raid = await findRaid(raidId);
+  const raid = await findRaid(req.guild.id, raidId);
   if (!raid) return res.status(404).json({ error: "Raid not found" });
 
   const { board, role } = req.body ?? {};
@@ -400,8 +428,8 @@ raidsRouter.post("/:id/auto-assign", async (req, res) => {
   if (!Object.hasOwn(AUTO_ASSIGN_ROLES, role)) return res.status(400).json({ error: "Invalid role" });
   const hasRole = AUTO_ASSIGN_ROLES[role];
 
-  const candidates = (await freePlayers(raidId)).filter((p) => hasRole(p.class));
-  const { parties } = (await getRaidWithSlots(raidId)).boards[board];
+  const candidates = (await freePlayers(req.guild.id, raidId)).filter((p) => hasRole(p.class));
+  const { parties } = (await getRaidWithSlots(req.guild.id, raidId)).boards[board];
 
   const seats = [];
   const full = [];
@@ -422,7 +450,7 @@ raidsRouter.post("/:id/auto-assign", async (req, res) => {
     });
   }
 
-  res.json({ raid: await getRaidWithSlots(raidId), assigned: seats.length, full, noneLeft });
+  res.json({ raid: await getRaidWithSlots(req.guild.id, raidId), assigned: seats.length, full, noneLeft });
 });
 
 // Fills the empty slots of every party on one board toward a full lineup: one High
@@ -432,14 +460,14 @@ raidsRouter.post("/:id/auto-assign", async (req, res) => {
 // spread over the parties instead of piling into the first one.
 raidsRouter.post("/:id/auto-assign-parties", async (req, res) => {
   const raidId = Number(req.params.id);
-  const raid = await findRaid(raidId);
+  const raid = await findRaid(req.guild.id, raidId);
   if (!raid) return res.status(404).json({ error: "Raid not found" });
 
   const { board } = req.body ?? {};
   if (!isValidBoard(raid, board)) return res.status(400).json({ error: "Invalid board" });
 
-  const free = await freePlayers(raidId);
-  const parties = (await getRaidWithSlots(raidId)).boards[board].parties.map((members) => [...members]);
+  const free = await freePlayers(req.guild.id, raidId);
+  const parties = (await getRaidWithSlots(req.guild.id, raidId)).boards[board].parties.map((members) => [...members]);
 
   // Seats are picked in memory, then written in one transaction.
   const seats = [];
@@ -494,14 +522,14 @@ raidsRouter.post("/:id/auto-assign-parties", async (req, res) => {
     })
     .filter((p) => p.missing.length > 0);
 
-  res.json({ raid: await getRaidWithSlots(raidId), assigned: seats.length, incomplete });
+  res.json({ raid: await getRaidWithSlots(req.guild.id, raidId), assigned: seats.length, incomplete });
 });
 
 // Empties one board: every slot goes back to the pool and custom party names are dropped.
 // The board keeps its party count.
 raidsRouter.post("/:id/clear", async (req, res) => {
   const raidId = Number(req.params.id);
-  const raid = await findRaid(raidId);
+  const raid = await findRaid(req.guild.id, raidId);
   if (!raid) return res.status(404).json({ error: "Raid not found" });
 
   const { board } = req.body ?? {};
@@ -513,14 +541,14 @@ raidsRouter.post("/:id/clear", async (req, res) => {
     await touchRaid(raidId);
   });
 
-  res.json({ raid: await getRaidWithSlots(raidId) });
+  res.json({ raid: await getRaidWithSlots(req.guild.id, raidId) });
 });
 
 // Set (or clear, with an empty/omitted name) a party's custom display name on one board.
 raidsRouter.patch("/:id/parties/:partyIndex", async (req, res) => {
   const raidId = Number(req.params.id);
   const partyIndex = Number(req.params.partyIndex);
-  const raid = await findRaid(raidId);
+  const raid = await findRaid(req.guild.id, raidId);
   if (!raid) return res.status(404).json({ error: "Raid not found" });
 
   const { board } = req.body ?? {};
@@ -538,5 +566,5 @@ raidsRouter.patch("/:id/parties/:partyIndex", async (req, res) => {
   await db.run(UPSERT_PARTY_NAME, raidId, board, partyIndex, name);
   await touchRaid(raidId);
 
-  res.json({ raid: await getRaidWithSlots(raidId) });
+  res.json({ raid: await getRaidWithSlots(req.guild.id, raidId) });
 });

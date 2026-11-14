@@ -1,8 +1,12 @@
+import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store/auth";
+import { GuildSettingsModal } from "./GuildSettingsModal";
 
 export function Navbar() {
   const logout = useAuthStore((s) => s.logout);
+  const guild = useAuthStore((s) => s.guild);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const navigate = useNavigate();
 
   async function handleLogout() {
@@ -36,6 +40,15 @@ export function Navbar() {
           </nav>
         </div>
         <div className="flex items-center gap-4">
+          {guild && (
+            <button
+              onClick={() => setSettingsOpen(true)}
+              title="Guild settings"
+              className="rounded-lg px-3 py-2 text-base font-medium text-gold transition-colors hover:bg-panel-alt"
+            >
+              {guild.name} <span aria-hidden>⚙</span>
+            </button>
+          )}
           <button
             onClick={handleLogout}
             className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim transition-colors hover:border-danger hover:text-danger"
@@ -44,6 +57,7 @@ export function Navbar() {
           </button>
         </div>
       </div>
+      {settingsOpen && <GuildSettingsModal onClose={() => setSettingsOpen(false)} />}
     </header>
   );
 }

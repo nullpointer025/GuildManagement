@@ -152,3 +152,28 @@ export interface ImportSummary {
   flaggedInactive: number;
   activeTotal: number;
 }
+
+// The guild the current invite code opened.
+export interface Guild {
+  id: number;
+  name: string;
+  // The guild turned on "Sync with Discord" in Guild settings.
+  discordSyncEnabled: boolean;
+  discordGuildId: string | null;
+  // The site has a Discord bot token configured.
+  discordBotAvailable: boolean;
+  // Bot token and this guild's server ID are both set, so "Sync with Discord" works.
+  discordReady: boolean;
+}
+
+// A guild as the site admin page lists it.
+export interface AdminGuild {
+  id: number;
+  name: string;
+  inviteCode: string;
+  // Set only while the guild has Discord sync turned on.
+  discordGuildId: string | null;
+  createdAt: string;
+  activePlayers: number;
+  raids: number;
+}

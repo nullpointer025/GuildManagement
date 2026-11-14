@@ -13,14 +13,15 @@ const upload = multer({ limits: { fileSize: 4 * 1024 * 1024 } });
 
 playersRouter.get("/", async (req, res) => {
   const players = await db.all(
-    `SELECT * FROM players ORDER BY active DESC, gear_score IS NULL, gear_score DESC, lower(ign) ASC`
+    `SELECT * FROM players WHERE guild_id = ? ORDER BY active DESC, gear_score IS NULL, gear_score DESC, lower(ign) ASC`,
+    req.guild.id
   );
   res.json({ players });
 });
 
 playersRouter.patch("/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const player = await db.get("SELECT * FROM players WHERE id = ?", id);
+  const player = await db.get("SELECT * FROM players WHERE id = ? AND guild_id = ?", id, req.guild.id);
   if (!player) return res.status(404).json({ error: "Player not found" });
 
   const allowed = ["active", "title", "position", "in_discord", "ultimate"];
@@ -36,10 +37,13 @@ playersRouter.patch("/:id", async (req, res) => {
   if (updates.length === 0) {
     return res.status(400).json({ error: "No valid fields to update" });
   }
-  values.push(id);
-  await db.run(`UPDATE players SET ${updates.join(", ")}, updated_at = now_text() WHERE id = ?`, ...values);
+  values.push(id, req.guild.id);
+  await db.run(
+    `UPDATE players SET ${updates.join(", ")}, updated_at = now_text() WHERE id = ? AND guild_id = ?`,
+    ...values
+  );
 
-  const updated = await db.get("SELECT * FROM players WHERE id = ?", id);
+  const updated = await db.get("SELECT * FROM players WHERE id = ? AND guild_id = ?", id, req.guild.id);
   res.json({ player: updated });
 });
 
@@ -84,18 +88,22 @@ playersRouter.post("/import", upload.single("file"), async (req, res) => {
   // Everyone starts inactive; whoever is in this export is upserted back to active,
   // so missing members end up flagged instead of deleted.
   const results = await transaction(async () => {
-    await db.run("UPDATE players SET active = 0, updated_at = now_text() WHERE active = 1");
+    await db.run(
+      "UPDATE players SET active = 0, updated_at = now_text() WHERE active = 1 AND guild_id = ?",
+      req.guild.id
+    );
     return db.all(
-      `INSERT INTO players (ign, ${IMPORT_FIELDS.join(", ")}, active, last_imported_at)
-       SELECT ign, ${IMPORT_FIELDS.join(", ")}, 1, now_text()
+      `INSERT INTO players (guild_id, ign, ${IMPORT_FIELDS.join(", ")}, active, last_imported_at)
+       SELECT ?::bigint, ign, ${IMPORT_FIELDS.join(", ")}, 1, now_text()
        FROM jsonb_to_recordset(?::text::jsonb) AS r(
          ign text, level bigint, class text, title text, gender text, position text, gear_score bigint,
          weekly bigint, weekly_contribution bigint, total_contribution bigint, online_status text
        )
-       ON CONFLICT (ign) DO UPDATE SET
+       ON CONFLICT (guild_id, ign) DO UPDATE SET
          ${IMPORT_FIELDS.map((f) => `${f} = excluded.${f}`).join(", ")},
          active = 1, last_imported_at = now_text(), updated_at = now_text()
        RETURNING (xmax = 0) AS inserted`,
+      req.guild.id,
       JSON.stringify([...byIgn.values()])
     );
   });
@@ -103,7 +111,8 @@ playersRouter.post("/import", upload.single("file"), async (req, res) => {
   const added = results.filter((r) => r.inserted).length;
   const updated = results.length - added;
   const counts = await db.get(
-    "SELECT COUNT(*) FILTER (WHERE active = 0) AS removed, COUNT(*) FILTER (WHERE active = 1) AS total FROM players"
+    "SELECT COUNT(*) FILTER (WHERE active = 0) AS removed, COUNT(*) FILTER (WHERE active = 1) AS total FROM players WHERE guild_id = ?",
+    req.guild.id
   );
 
   res.json({
@@ -115,22 +124,26 @@ playersRouter.post("/import", upload.single("file"), async (req, res) => {
 // rules live in createDiscordMatcher) and sets in_discord accordingly — overwriting
 // any manual ticks with what Discord reports.
 playersRouter.post("/discord-sync", async (req, res) => {
-  if (!discordConfigured()) {
-    return res
-      .status(503)
-      .json({ error: "Discord isn't set up — add DISCORD_BOT_TOKEN and DISCORD_GUILD_ID to the server env" });
+  if (!req.guild.discord_sync_enabled) {
+    return res.status(400).json({ error: "Discord sync is turned off — turn it on in Guild settings" });
+  }
+  if (!process.env.DISCORD_BOT_TOKEN) {
+    return res.status(503).json({ error: "Discord isn't set up on this site — add DISCORD_BOT_TOKEN to the server env" });
+  }
+  if (!discordConfigured(req.guild)) {
+    return res.status(400).json({ error: "Add your Discord server ID in Guild settings first" });
   }
 
   let members;
   try {
-    members = await fetchGuildMembers();
+    members = await fetchGuildMembers(req.guild.discord_guild_id);
   } catch (err) {
     if (err instanceof DiscordError) return res.status(err.status).json({ error: err.message });
     throw err;
   }
   const isInDiscord = createDiscordMatcher(members);
 
-  const players = await db.all("SELECT id, ign, active FROM players");
+  const players = await db.all("SELECT id, ign, active FROM players WHERE guild_id = ?", req.guild.id);
   let matched = 0;
   let missing = 0;
   const flags = players.map((p) => {
@@ -142,8 +155,9 @@ playersRouter.post("/discord-sync", async (req, res) => {
   await db.run(
     `UPDATE players p SET in_discord = r.in_discord, updated_at = now_text()
      FROM jsonb_to_recordset(?::text::jsonb) AS r(id bigint, in_discord int)
-     WHERE p.id = r.id`,
-    JSON.stringify(flags)
+     WHERE p.id = r.id AND p.guild_id = ?`,
+    JSON.stringify(flags),
+    req.guild.id
   );
 
   res.json({ summary: { matched, missing, discordMembers: members.length } });

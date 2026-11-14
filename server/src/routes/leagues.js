@@ -18,8 +18,10 @@ function optionalCount(value) {
 
 // Suggests the roster player for each parsed row. Nothing is saved — the officer
 // reviews and corrects the rows first.
-async function previewRows(rows) {
-  const matchPlayer = createRosterMatcher(await db.all("SELECT id, ign, active FROM players"));
+async function previewRows(guildId, rows) {
+  const matchPlayer = createRosterMatcher(
+    await db.all("SELECT id, ign, active FROM players WHERE guild_id = ?", guildId)
+  );
   return rows.map((r) => ({
     ign: r.ign,
     kills: r.kills,
@@ -39,7 +41,7 @@ leaguesRouter.post("/preview", async (req, res) => {
   } catch (err) {
     return res.status(400).json({ error: err.message || "Couldn't read the CSV" });
   }
-  res.json({ rows: await previewRows(rows) });
+  res.json({ rows: await previewRows(req.guild.id, rows) });
 });
 
 // Takes the raw rows the browser read from the battle-record screenshots with OCR
@@ -53,7 +55,7 @@ leaguesRouter.post("/preview-ocr", async (req, res) => {
   if (rows.length === 0) {
     return res.status(400).json({ error: "No player rows found in the screenshots — try sharper, uncropped screenshots or use the CSV instead" });
   }
-  res.json({ rows: await previewRows(rows) });
+  res.json({ rows: await previewRows(req.guild.id, rows) });
 });
 
 leaguesRouter.post("/", async (req, res) => {
@@ -70,7 +72,9 @@ leaguesRouter.post("/", async (req, res) => {
 
   const rows = Array.isArray(body.rows) ? body.rows : [];
   if (rows.length === 0) return res.status(400).json({ error: "No players to save" });
-  const known = new Set((await db.all("SELECT id FROM players")).map((p) => p.id));
+  const known = new Set(
+    (await db.all("SELECT id FROM players WHERE guild_id = ?", req.guild.id)).map((p) => p.id)
+  );
   const parsed = [];
   for (const r of rows) {
     const ign = typeof r?.ign === "string" ? r.ign.trim() : "";
@@ -87,7 +91,9 @@ leaguesRouter.post("/", async (req, res) => {
 
   const id = await transaction(async () => {
     const info = await db.run(
-      "INSERT INTO guild_leagues (date, result, participants, total_kills, towers) VALUES (?, ?, ?, ?, ?) RETURNING id",
+      `INSERT INTO guild_leagues (guild_id, date, result, participants, total_kills, towers)
+       VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+      req.guild.id,
       body.date,
       result,
       ...counts.map((c) => c.value)
@@ -115,7 +121,9 @@ leaguesRouter.get("/", async (req, res) => {
   const leagues = await db.all(
     `SELECT l.*, COUNT(s.player_id) AS recorded
      FROM guild_leagues l LEFT JOIN guild_league_stats s ON s.league_id = l.id
-     GROUP BY l.id ORDER BY l.date DESC, l.id DESC`
+     WHERE l.guild_id = ?
+     GROUP BY l.id ORDER BY l.date DESC, l.id DESC`,
+    req.guild.id
   );
   res.json({ leagues });
 });
@@ -124,9 +132,12 @@ leaguesRouter.get("/", async (req, res) => {
 // still in the guild, plus anyone who has left but has league history.
 leaguesRouter.get("/tracker", async (req, res) => {
   const [leagues, stats, allPlayers] = await Promise.all([
-    db.all("SELECT id, date FROM guild_leagues ORDER BY date DESC, id DESC"),
-    db.all("SELECT * FROM guild_league_stats"),
-    db.all("SELECT id, ign, class, active FROM players"),
+    db.all("SELECT id, date FROM guild_leagues WHERE guild_id = ? ORDER BY date DESC, id DESC", req.guild.id),
+    db.all(
+      `SELECT s.* FROM guild_league_stats s JOIN guild_leagues l ON l.id = s.league_id WHERE l.guild_id = ?`,
+      req.guild.id
+    ),
+    db.all("SELECT id, ign, class, active FROM players WHERE guild_id = ?", req.guild.id),
   ]);
   const dateOf = new Map(leagues.map((l) => [l.id, l.date]));
   const order = new Map(leagues.map((l, i) => [l.id, i]));
@@ -170,7 +181,11 @@ leaguesRouter.get("/tracker", async (req, res) => {
 });
 
 leaguesRouter.get("/:id", async (req, res) => {
-  const league = await db.get("SELECT * FROM guild_leagues WHERE id = ?", Number(req.params.id));
+  const league = await db.get(
+    "SELECT * FROM guild_leagues WHERE id = ? AND guild_id = ?",
+    Number(req.params.id),
+    req.guild.id
+  );
   if (!league) return res.status(404).json({ error: "League not found" });
   // Postgres folds unquoted aliases to lower case, so the camelCase ones are quoted.
   const stats = await db.all(
@@ -184,7 +199,11 @@ leaguesRouter.get("/:id", async (req, res) => {
 });
 
 leaguesRouter.delete("/:id", async (req, res) => {
-  const info = await db.run("DELETE FROM guild_leagues WHERE id = ?", Number(req.params.id));
+  const info = await db.run(
+    "DELETE FROM guild_leagues WHERE id = ? AND guild_id = ?",
+    Number(req.params.id),
+    req.guild.id
+  );
   if (info.changes === 0) return res.status(404).json({ error: "League not found" });
   res.json({ ok: true });
 });

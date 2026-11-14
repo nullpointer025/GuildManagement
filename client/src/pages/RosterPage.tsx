@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api/client";
 import type { DiscordSyncSummary, ImportSummary, Player, PlayerFlag } from "../types";
 import { CsvDropzone } from "../components/CsvDropzone";
+import { useAuthStore } from "../store/auth";
 
 type SortKey = "gear_score" | "level" | "ign" | "total_contribution";
 
@@ -22,6 +23,8 @@ export function RosterPage() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncSummary, setSyncSummary] = useState<DiscordSyncSummary | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const discordReady = useAuthStore((s) => s.guild?.discordReady ?? false);
+  const discordSyncEnabled = useAuthStore((s) => s.guild?.discordSyncEnabled ?? false);
 
   async function loadPlayers() {
     setLoading(true);
@@ -49,8 +52,10 @@ export function RosterPage() {
     } finally {
       setImporting(false);
     }
-    // New players start unticked, so re-check Discord right after every import.
-    await handleDiscordSync();
+    // New players start unticked, so re-check Discord right after every import
+    // (when this guild has Discord set up; otherwise just show the new roster).
+    if (discordReady) await handleDiscordSync();
+    else await loadPlayers();
   }
 
   async function handleDiscordSync() {
@@ -199,14 +204,16 @@ export function RosterPage() {
           />
           Only not in Discord
         </label>
-        <button
-          type="button"
-          onClick={handleDiscordSync}
-          disabled={syncing}
-          className="rounded-lg border border-border bg-panel-alt px-4 py-2.5 text-base text-ink hover:border-gold disabled:opacity-50"
-        >
-          {syncing ? "Syncing…" : "Sync with Discord"}
-        </button>
+        {discordSyncEnabled && (
+          <button
+            type="button"
+            onClick={handleDiscordSync}
+            disabled={syncing}
+            className="rounded-lg border border-border bg-panel-alt px-4 py-2.5 text-base text-ink hover:border-gold disabled:opacity-50"
+          >
+            {syncing ? "Syncing…" : "Sync with Discord"}
+          </button>
+        )}
       </div>
 
       <div className="-mt-4 flex flex-wrap items-center gap-x-8 gap-y-3">

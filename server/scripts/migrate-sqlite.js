@@ -2,8 +2,8 @@
 //
 //   node scripts/migrate-sqlite.js path/to/guild.db
 //
-// Needs DATABASE_URL (server/.env) and the schema from supabase/migrations already
-// applied. Refuses to run if the Postgres tables already hold data.
+// Needs DATABASE_URL (server/.env) and only 20261025000000_init.sql applied — run
+// the multi-guild migration afterwards, so it moves this data into the first guild. Refuses to run if the Postgres tables already hold data.
 import "dotenv/config";
 import { DatabaseSync } from "node:sqlite";
 import postgres from "postgres";
