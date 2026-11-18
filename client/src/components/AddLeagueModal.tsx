@@ -49,7 +49,9 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
   const guildName = useAuthStore((s) => s.guild?.name);
   const [step, setStep] = useState<Step>("input");
   const [field, setField] = useState<LeagueField | null>(null);
-  const [session, setSession] = useState<LeagueSession>(1);
+  // How many guild leagues were fought that day (asked first), then which one this is.
+  const [leaguesThatDay, setLeaguesThatDay] = useState<1 | 2 | null>(null);
+  const [session, setSession] = useState<LeagueSession | null>(null);
   const [date, setDate] = useState(todayIso());
   const [result, setResult] = useState<LeagueResult | "">("");
   const [opponent, setOpponent] = useState("");
@@ -173,10 +175,10 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
   }, {});
   const duplicatePicks = Object.values(pickCounts).some((n) => n > 1);
   const canSave = kept.length > 0 && unreadable === 0 && !duplicatePicks && !busy && field != null;
-  const canReview = field != null && ourRows.length > 0 && !busy;
+  const canReview = session != null && field != null && ourRows.length > 0 && !busy;
 
   async function save() {
-    if (!field) return;
+    if (!field || !session) return;
     setBusy(true);
     setError(null);
     try {
@@ -230,6 +232,55 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
 
         {step === "input" ? (
           <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">
+            <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
+              <label className="flex flex-col gap-2">
+                <span className={labelClass}>Date</span>
+                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClass} />
+              </label>
+              <div className="flex flex-col gap-2">
+                <span className={labelClass}>How many guild leagues were fought that day?</span>
+                <div className="flex gap-2">
+                  {([1, 2] as const).map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => {
+                        setLeaguesThatDay(n);
+                        // With one league that day, this record is from it; with two, ask which.
+                        setSession(n === 1 ? 1 : null);
+                      }}
+                      className={choiceClass(leaguesThatDay === n)}
+                    >
+                      {n} guild league{n === 1 ? "" : "s"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {leaguesThatDay === 2 && (
+                <div className="flex flex-col gap-2">
+                  <span className={labelClass}>Which one is this battle record from?</span>
+                  <div className="flex gap-2">
+                    {(
+                      [
+                        [1, "1st guild league"],
+                        [2, "2nd guild league"],
+                      ] as const
+                    ).map(([value, text]) => (
+                      <button key={value} type="button" onClick={() => setSession(value)} className={choiceClass(session === value)}>
+                        {text}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            {leaguesThatDay === 2 && (
+              <p className="-mt-2 text-xs text-ink-dim">
+                Upload every Main and Sub export of the same league under the same choice — attendance counts each guild
+                league once.
+              </p>
+            )}
+
             <div className="flex flex-col gap-2">
               <span className={labelClass}>Which field is this battle record from?</span>
               <div className="flex gap-2">
@@ -246,25 +297,6 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
               </div>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <span className={labelClass}>Which guild league of the day?</span>
-              <div className="flex gap-2">
-                {(
-                  [
-                    [1, "1st guild league"],
-                    [2, "2nd guild league"],
-                  ] as const
-                ).map(([value, text]) => (
-                  <button key={value} type="button" onClick={() => setSession(value)} className={choiceClass(session === value)}>
-                    {text}
-                  </button>
-                ))}
-              </div>
-              <p className="text-xs text-ink-dim">
-                Upload every Main and Sub export of the same league under the same choice — attendance counts each guild
-                league once.
-              </p>
-            </div>
 
             <div className="flex flex-col gap-2">
               <span className={labelClass}>Battle record</span>
@@ -343,7 +375,7 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <label className="col-span-2 flex flex-col gap-1">
                 <span className={labelClass}>Enemy guild name</span>
                 <input
@@ -356,10 +388,6 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
                 <datalist id="enemy-guilds">
                   {file?.guilds.filter((g) => g.name !== ourGuild).map((g) => <option key={g.name} value={g.name} />)}
                 </datalist>
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className={labelClass}>Date</span>
-                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClass} />
               </label>
               <label className="flex flex-col gap-1">
                 <span className={labelClass}>Result</span>
@@ -460,7 +488,17 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
               type="button"
               onClick={preview}
               disabled={!canReview}
-              title={field == null ? "Pick Main field or Sub field" : ourRows.length === 0 ? "Load the battle record and pick your guild" : undefined}
+              title={
+                leaguesThatDay == null
+                  ? "Pick how many guild leagues were fought that day"
+                  : session == null
+                    ? "Pick which guild league this battle record is from"
+                    : field == null
+                      ? "Pick Main field or Sub field"
+                      : ourRows.length === 0
+                        ? "Load the battle record and pick your guild"
+                        : undefined
+              }
               className="rounded-lg bg-gold px-4 py-2 text-base font-semibold text-bg transition-colors hover:bg-gold-bright disabled:cursor-not-allowed disabled:opacity-60"
             >
               {busy ? "Reading…" : "Review →"}
