@@ -3,6 +3,7 @@ import multer from "multer";
 import { db, transaction } from "../db.js";
 import { requireAccess } from "../auth.js";
 import { parsePlayersCsv } from "../csvImport.js";
+import { linkPendingLeagueStats, renamePlayersFromLeagueNames } from "../leagueRoster.js";
 import { DiscordError, createDiscordMatcher, discordConfigured, fetchGuildMembers } from "../discord.js";
 
 export const playersRouter = Router();
@@ -85,14 +86,17 @@ playersRouter.post("/import", upload.single("file"), async (req, res) => {
     byIgn.set(row.ign, Object.fromEntries([["ign", row.ign], ...values]));
   }
 
-  // Everyone starts inactive; whoever is in this export is upserted back to active,
-  // so missing members end up flagged instead of deleted.
-  const results = await transaction(async () => {
+  // Renamed players are renamed first so the upsert finds them. Everyone then starts
+  // inactive; whoever is in this export is upserted back to active, so missing
+  // members end up flagged instead of deleted. Finally, guild league rows of players
+  // who weren't in the roster yet are linked to them.
+  const { results, renamed, leagueRowsLinked } = await transaction(async () => {
+    const renamed = await renamePlayersFromLeagueNames(req.guild.id, [...byIgn.keys()]);
     await db.run(
       "UPDATE players SET active = 0, updated_at = now_text() WHERE active = 1 AND guild_id = ?",
       req.guild.id
     );
-    return db.all(
+    const results = await db.all(
       `INSERT INTO players (guild_id, ign, ${IMPORT_FIELDS.join(", ")}, active, last_imported_at)
        SELECT ?::bigint, ign, ${IMPORT_FIELDS.join(", ")}, 1, now_text()
        FROM jsonb_to_recordset(?::text::jsonb) AS r(
@@ -106,17 +110,19 @@ playersRouter.post("/import", upload.single("file"), async (req, res) => {
       req.guild.id,
       JSON.stringify([...byIgn.values()])
     );
+    const leagueRowsLinked = await linkPendingLeagueStats(req.guild.id);
+    return { results, renamed, leagueRowsLinked };
   });
 
   const added = results.filter((r) => r.inserted).length;
-  const updated = results.length - added;
+  const updated = results.length - added - renamed;
   const counts = await db.get(
     "SELECT COUNT(*) FILTER (WHERE active = 0) AS removed, COUNT(*) FILTER (WHERE active = 1) AS total FROM players WHERE guild_id = ?",
     req.guild.id
   );
 
   res.json({
-    summary: { added, updated, flaggedInactive: counts.removed, activeTotal: counts.total },
+    summary: { added, updated, renamed, leagueRowsLinked, flaggedInactive: counts.removed, activeTotal: counts.total },
   });
 });
 

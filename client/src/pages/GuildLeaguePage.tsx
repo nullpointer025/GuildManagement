@@ -504,7 +504,17 @@ export function GuildLeaguePage() {
                       </td>
                       <td className={`${td} text-right font-mono`}>{formatCount(l.participants)}</td>
                       <td className={`${td} text-right font-mono`}>{formatCount(l.total_kills)}</td>
-                      <td className={`${td} text-right font-mono`}>{l.recorded}</td>
+                      <td className={`${td} text-right font-mono`}>
+                        {l.recorded}
+                        {l.pending > 0 && (
+                          <span
+                            className="ml-2 text-sm text-gold"
+                            title="Players not in the roster yet — linked automatically after the next roster upload"
+                          >
+                            +{l.pending} pending
+                          </span>
+                        )}
+                      </td>
                       <td className={`${td} text-right`} onClick={(e) => e.stopPropagation()}>
                         {confirmDeleteId === l.id ? (
                           <button
@@ -547,6 +557,21 @@ export function GuildLeaguePage() {
                                       {s.ign !== s.rosterIgn && <span className="ml-2 text-xs text-ink-dim">as “{s.ign}”</span>}
                                     </td>
                                     <td className="py-1.5 pr-4 whitespace-nowrap text-ink-dim">{s.job ?? s.class ?? "—"}</td>
+                                    <StatCells line={s} />
+                                  </tr>
+                                ))}
+                                {expandedLeague.pending.map((s) => (
+                                  <tr key={`pending-${s.id}`} className="border-t border-border-soft opacity-70">
+                                    <td className="py-1.5 pr-4 whitespace-nowrap">
+                                      <span className="text-heading">{s.ign}</span>
+                                      <span
+                                        className="ml-2 rounded-full bg-gold/15 px-2 py-0.5 text-xs text-gold"
+                                        title="Not in the roster yet — linked automatically after the next roster upload"
+                                      >
+                                        not in roster yet
+                                      </span>
+                                    </td>
+                                    <td className="py-1.5 pr-4 whitespace-nowrap text-ink-dim">{s.job ?? "—"}</td>
                                     <StatCells line={s} />
                                   </tr>
                                 ))}

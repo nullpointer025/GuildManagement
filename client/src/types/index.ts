@@ -60,6 +60,8 @@ export interface League {
   total_kills: number | null;
   towers: number | null;
   recorded: number;
+  // Rows of players who weren't in the roster yet; linked by the next roster import.
+  pending: number;
 }
 
 export type LeagueStatKey =
@@ -88,8 +90,15 @@ export interface LeaguePlayerStat extends LeagueStatLine {
   job: string | null;
 }
 
-export interface LeagueDetail extends Omit<League, "recorded"> {
+export interface LeaguePendingStat extends LeagueStatLine {
+  id: number;
+  ign: string;
+  job: string | null;
+}
+
+export interface LeagueDetail extends Omit<League, "recorded" | "pending"> {
   stats: LeaguePlayerStat[];
+  pending: LeaguePendingStat[];
 }
 
 // One row of the battle-record .xlsx, as text.
@@ -104,7 +113,8 @@ export interface LeaguePreviewRow extends LeagueStatLine {
 }
 
 export interface LeagueSaveRow extends LeagueStatLine {
-  playerId: number;
+  // null = not in the roster yet; saved and linked by the next roster import.
+  playerId: number | null;
   ign: string;
   job: string | null;
 }
@@ -188,6 +198,10 @@ export interface DiscordSyncSummary {
 export interface ImportSummary {
   added: number;
   updated: number;
+  // Players recognised as renamed (from names assigned in guild league uploads).
+  renamed: number;
+  // Guild league rows of players who weren't in the roster yet, now linked to them.
+  leagueRowsLinked: number;
   flaggedInactive: number;
   activeTotal: number;
 }

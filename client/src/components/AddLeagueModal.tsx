@@ -171,7 +171,7 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
     return acc;
   }, {});
   const duplicatePicks = Object.values(pickCounts).some((n) => n > 1);
-  const canSave = kept.length > 0 && unpicked === 0 && unreadable === 0 && !duplicatePicks && !busy && field != null;
+  const canSave = kept.length > 0 && unreadable === 0 && !duplicatePicks && !busy && field != null;
   const canReview = field != null && ourRows.length > 0 && !busy;
 
   async function save() {
@@ -187,7 +187,7 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
         // Our guild's participants and total kills come straight from the battle record.
         participants: String(ourRows.length),
         totalKills: String(ourRows.reduce((t, r) => t + (Number(r.kills) || 0), 0)),
-        rows: kept.map(({ pick, autoMatched: _a, error: _e, playerId: _p, ...line }) => ({ ...line, playerId: Number(pick) })),
+        rows: kept.map(({ pick, autoMatched: _a, error: _e, playerId: _p, ...line }) => ({ ...line, playerId: pick ? Number(pick) : null })),
       });
       onSaved(field);
     } catch (err) {
@@ -353,7 +353,12 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
           <div className="flex min-h-0 flex-1 flex-col">
             <p className="shrink-0 px-4 pt-3 text-sm text-ink-dim">
               {rows.length} {ourGuild} players · <span className="text-success">{rows.filter((r) => r.autoMatched).length} matched automatically</span>
-              {unpicked > 0 && <span className="text-danger"> · {unpicked} need a roster player</span>}
+              {unpicked > 0 && (
+                <span className="text-gold">
+                  {" "}
+                  · {unpicked} not in the roster yet — saved and linked automatically after the next roster upload
+                </span>
+              )}
               {rows.length - kept.length > 0 && <span> · {rows.length - kept.length} ignored</span>}
             </p>
             <div className="min-h-0 flex-1 overflow-auto p-4">
@@ -385,9 +390,10 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
                             value={r.pick}
                             players={rosterOptions}
                             onChange={(pick) => updateRow(i, { pick, autoMatched: false })}
+                            emptyLabel="Not in roster yet"
                             className={[
                               "w-52 rounded-md border bg-panel-alt px-2 py-1 text-sm text-ink outline-none focus:border-gold",
-                              r.pick === "" || clash ? "border-danger" : r.autoMatched ? "border-success/60" : "border-border",
+                              clash ? "border-danger" : r.pick === "" ? "border-gold/60" : r.autoMatched ? "border-success/60" : "border-border",
                             ].join(" ")}
                           />
                           {clash && <p className="text-xs text-danger">Picked for another row too</p>}
@@ -443,9 +449,7 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
               onClick={save}
               disabled={!canSave}
               title={
-                unpicked > 0
-                  ? "Pick a roster player (or Ignore) for every row"
-                  : duplicatePicks
+                duplicatePicks
                     ? "A roster player is picked twice"
                     : unreadable > 0
                       ? "Ignore the rows flagged in red"

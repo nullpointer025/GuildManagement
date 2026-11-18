@@ -159,6 +159,16 @@ export function RosterPage() {
             Import complete —{" "}
             <span className="text-success">{summary.added} added</span>,{" "}
             <span className="text-gold">{summary.updated} updated</span>
+            {summary.renamed > 0 && (
+              <>
+                , <span className="text-gold">{summary.renamed} renamed (league stats kept)</span>
+              </>
+            )}
+            {summary.leagueRowsLinked > 0 && (
+              <>
+                , <span className="text-success">{summary.leagueRowsLinked} guild league records linked to new members</span>
+              </>
+            )}
             {summary.flaggedInactive > 0 && (
               <>
                 , <span className="text-danger">{summary.flaggedInactive} not in this export</span>

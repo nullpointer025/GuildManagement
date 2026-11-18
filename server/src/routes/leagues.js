@@ -9,6 +9,7 @@ leaguesRouter.use(requireAccess);
 
 const RESULTS = ["victory", "defeat"];
 const MAX_ROWS = 2000;
+const MAX_LEAGUES_PER_DATE = 2;
 
 // guild_league_stats columns as camelCase API keys. Postgres folds unquoted
 // aliases to lower case, so they're quoted.
@@ -59,30 +60,39 @@ leaguesRouter.post("/", async (req, res) => {
   const known = new Set(
     (await db.all("SELECT id FROM players WHERE guild_id = ?", req.guild.id)).map((p) => p.id)
   );
+  // A row with playerId null is a player not in the roster yet: it's kept as pending
+  // and linked automatically by the next roster import that brings them in.
   const parsed = [];
+  const pending = [];
   for (const r of rows) {
     const ign = typeof r?.ign === "string" ? r.ign.trim() : "";
-    if (!Number.isInteger(r?.playerId) || !known.has(r.playerId)) {
+    const isPending = r?.playerId == null;
+    if (!isPending && (!Number.isInteger(r.playerId) || !known.has(r.playerId))) {
       return res.status(400).json({ error: `Pick a roster player for "${ign || "?"}"` });
     }
+    if (isPending && !ign) return res.status(400).json({ error: "A row has no player name" });
     const { stats, error } = parseRowStats(r);
     if (error) return res.status(400).json({ error: `Check the numbers for "${ign}"` });
     const job = typeof r.job === "string" ? r.job.trim().slice(0, 50) || null : null;
-    parsed.push({ player_id: r.playerId, ign: ign || "?", job, ...stats });
+    if (isPending) pending.push({ ign, job, ...stats });
+    else parsed.push({ player_id: r.playerId, ign: ign || "?", job, ...stats });
   }
   if (new Set(parsed.map((p) => p.player_id)).size !== parsed.length) {
     return res.status(400).json({ error: "The same roster player is picked for two rows" });
   }
+  if (new Set(pending.map((p) => p.ign)).size !== pending.length) {
+    return res.status(400).json({ error: "The same name appears in two rows" });
+  }
 
-  const existing = await db.get(
-    "SELECT id FROM guild_leagues WHERE guild_id = ? AND date = ? AND field = ?",
+  // At most two guild leagues are fought on one date.
+  const sameDate = await db.get(
+    "SELECT COUNT(*) AS n FROM guild_leagues WHERE guild_id = ? AND date = ?",
     req.guild.id,
-    body.date,
-    body.field
+    body.date
   );
-  if (existing) {
+  if (sameDate.n >= MAX_LEAGUES_PER_DATE) {
     return res.status(409).json({
-      error: `A ${body.field === "main" ? "Main" : "Sub"} field league on this date is already saved — delete it first to replace it`,
+      error: `${MAX_LEAGUES_PER_DATE} guild leagues are already saved on this date — delete one first to replace it`,
     });
   }
 
@@ -97,21 +107,31 @@ leaguesRouter.post("/", async (req, res) => {
       result,
       ...counts.map((c) => c.value)
     );
-    const statRows = parsed.map((p) => {
-      const row = { player_id: p.player_id, ign: p.ign, job: p.job };
+    const toColumns = (p) => {
+      const row = { player_id: p.player_id ?? null, ign: p.ign, job: p.job };
       for (const s of LEAGUE_STATS) row[s.column] = p[s.key];
       return row;
-    });
+    };
     const columns = LEAGUE_STATS.map((s) => s.column);
-    await db.run(
-      `INSERT INTO guild_league_stats (league_id, player_id, ign, job, ${columns.join(", ")})
-       SELECT ?::bigint, player_id, ign, job, ${columns.join(", ")}
-       FROM jsonb_to_recordset(?::text::jsonb) AS r(
-         player_id bigint, ign text, job text, ${columns.map((c) => `${c} bigint`).join(", ")}
-       )`,
-      info.id,
-      JSON.stringify(statRows)
-    );
+    const recordset = `jsonb_to_recordset(?::text::jsonb) AS r(
+      player_id bigint, ign text, job text, ${columns.map((c) => `${c} bigint`).join(", ")}
+    )`;
+    if (parsed.length > 0) {
+      await db.run(
+        `INSERT INTO guild_league_stats (league_id, player_id, ign, job, ${columns.join(", ")})
+         SELECT ?::bigint, player_id, ign, job, ${columns.join(", ")} FROM ${recordset}`,
+        info.id,
+        JSON.stringify(parsed.map(toColumns))
+      );
+    }
+    if (pending.length > 0) {
+      await db.run(
+        `INSERT INTO guild_league_pending (league_id, ign, job, ${columns.join(", ")})
+         SELECT ?::bigint, ign, job, ${columns.join(", ")} FROM ${recordset}`,
+        info.id,
+        JSON.stringify(pending.map(toColumns))
+      );
+    }
     return info.id;
   });
 
@@ -120,10 +140,12 @@ leaguesRouter.post("/", async (req, res) => {
 
 leaguesRouter.get("/", async (req, res) => {
   const leagues = await db.all(
-    `SELECT l.*, COUNT(s.player_id) AS recorded
-     FROM guild_leagues l LEFT JOIN guild_league_stats s ON s.league_id = l.id
+    `SELECT l.*,
+            (SELECT COUNT(*) FROM guild_league_stats s WHERE s.league_id = l.id) AS recorded,
+            (SELECT COUNT(*) FROM guild_league_pending p WHERE p.league_id = l.id) AS pending
+     FROM guild_leagues l
      WHERE l.guild_id = ?
-     GROUP BY l.id ORDER BY l.date DESC, l.field ASC, l.id DESC`,
+     ORDER BY l.date DESC, l.field ASC, l.id DESC`,
     req.guild.id
   );
   res.json({ leagues });
@@ -217,7 +239,11 @@ leaguesRouter.get("/:id", async (req, res) => {
      WHERE s.league_id = ? ORDER BY s.kills DESC`,
     league.id
   );
-  res.json({ league: { ...league, stats } });
+  const pending = await db.all(
+    `SELECT s.id, s.ign, s.job, ${STAT_SELECT} FROM guild_league_pending s WHERE s.league_id = ? ORDER BY s.kills DESC`,
+    league.id
+  );
+  res.json({ league: { ...league, stats, pending } });
 });
 
 leaguesRouter.delete("/:id", async (req, res) => {

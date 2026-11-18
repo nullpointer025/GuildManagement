@@ -8,6 +8,8 @@ interface RosterPlayerSelectProps {
   players: Player[];
   onChange: (value: string) => void;
   className?: string;
+  // When set, "" is a real choice shown with this label instead of "— pick a player —".
+  emptyLabel?: string;
 }
 
 interface Option {
@@ -22,7 +24,7 @@ const IGNORE: Option = { value: "ignore", label: "Ignore this row" };
 // plain <select> is slow. The list is portalled to <body> and fixed-positioned so
 // the scrolling review table doesn't clip it and a faded (ignored) row doesn't
 // fade it too.
-export function RosterPlayerSelect({ value, players, onChange, className = "" }: RosterPlayerSelectProps) {
+export function RosterPlayerSelect({ value, players, onChange, className = "", emptyLabel }: RosterPlayerSelectProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [active, setActive] = useState(0);
@@ -43,11 +45,14 @@ export function RosterPlayerSelect({ value, players, onChange, className = "" }:
         return 0;
       })
       .map((p) => ({ value: String(p.id), label: p.ign, note: p.active === 1 ? undefined : "left guild" }));
-    return q && !IGNORE.label.toLowerCase().includes(q) ? matches : [IGNORE, ...matches];
-  }, [players, search]);
+    const extras = [IGNORE, ...(emptyLabel ? [{ value: "", label: emptyLabel }] : [])].filter(
+      (o) => !q || o.label.toLowerCase().includes(q)
+    );
+    return [...extras, ...matches];
+  }, [players, search, emptyLabel]);
 
   const selected = value === "ignore" ? IGNORE : players.find((p) => String(p.id) === value);
-  const selectedLabel = selected ? ("ign" in selected ? selected.ign : selected.label) : "— pick a player —";
+  const selectedLabel = selected ? ("ign" in selected ? selected.ign : selected.label) : emptyLabel ?? "— pick a player —";
 
   function openList() {
     const rect = buttonRef.current?.getBoundingClientRect();
