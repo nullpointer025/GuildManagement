@@ -15,7 +15,11 @@ import { formatCount, formatDate, formatStat } from "../lib/format";
 import { LEAGUE_STATS } from "../lib/battleRecord";
 
 type Tab = "tracker" | "leagues";
-type TrackerSort = "attendance" | "played" | "ign" | LeagueStatKey;
+type TrackerSort = "attendance" | "played" | "ign" | "lastAttended" | LeagueStatKey;
+type SortDir = "asc" | "desc";
+
+// Names sort A→Z first; numbers and dates sort highest/latest first.
+const defaultDir = (key: TrackerSort): SortDir => (key === "ign" ? "asc" : "desc");
 
 const th = "px-4 py-3 font-medium";
 const td = "px-4 py-3";
@@ -27,6 +31,42 @@ const TRACKER_STATS = LEAGUE_STATS.filter((s) =>
   ["kills", "assists", "playerDamage", "buildingDamage", "heal", "deaths"].includes(s.key)
 );
 const FIELD_LABEL: Record<LeagueField, string> = { main: "Main", sub: "Sub" };
+
+// A clickable column header that sorts the tracker by its column; clicking the
+// sorted column again flips the direction.
+function SortHeader({
+  label,
+  column,
+  sort,
+  onSort,
+  align = "left",
+}: {
+  label: string;
+  column: TrackerSort;
+  sort: { key: TrackerSort; dir: SortDir };
+  onSort: (key: TrackerSort) => void;
+  align?: "left" | "right";
+}) {
+  const active = sort.key === column;
+  return (
+    <th className={th} aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        className={[
+          "inline-flex w-full items-center gap-1 uppercase tracking-wide transition-colors hover:text-ink",
+          align === "right" ? "justify-end" : "",
+          active ? "text-gold" : "",
+        ].join(" ")}
+      >
+        {label}
+        <span aria-hidden className={["text-xs", active ? "" : "opacity-30"].join(" ")}>
+          {active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}
+        </span>
+      </button>
+    </th>
+  );
+}
 
 function attendanceColor(pct: number) {
   if (pct >= 75) return "text-success";
@@ -157,7 +197,7 @@ export function GuildLeaguePage() {
   const [adding, setAdding] = useState(false);
   const [field, setField] = useState<LeagueField>("main");
   const [search, setSearch] = useState("");
-  const [sortKey, setSortKey] = useState<TrackerSort>("attendance");
+  const [sort, setSort] = useState<{ key: TrackerSort; dir: SortDir }>({ key: "attendance", dir: "desc" });
   const [onlyField, setOnlyField] = useState(false);
   const [onlyMissedLatest, setOnlyMissedLatest] = useState(false);
   const [showLeft, setShowLeft] = useState(false);
@@ -185,19 +225,40 @@ export function GuildLeaguePage() {
 
   const trackerRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const value = (p: TrackerPlayer) => {
-      if (sortKey === "attendance") return p.attended;
-      if (sortKey === "played") return p.fields[field].played;
-      if (sortKey === "ign") return 0;
-      return p.fields[field].averages[sortKey] ?? -1;
+    // null = nothing to sort by (e.g. no games in this field); those rows always go last.
+    const value = (p: TrackerPlayer): number | string | null => {
+      const { key } = sort;
+      if (key === "ign") return p.ign.toLowerCase();
+      if (key === "attendance") return p.attended;
+      if (key === "played") return p.fields[field].played;
+      if (key === "lastAttended") return p.lastAttended;
+      return p.fields[field].averages[key];
+    };
+    const sign = sort.dir === "asc" ? 1 : -1;
+    const compare = (a: TrackerPlayer, b: TrackerPlayer) => {
+      const va = value(a);
+      const vb = value(b);
+      if (va == null || vb == null) {
+        if (va != null) return -1;
+        if (vb != null) return 1;
+      } else if (va !== vb) {
+        return (typeof va === "string" ? va.localeCompare(vb as string) : va - (vb as number)) * sign;
+      }
+      return a.ign.localeCompare(b.ign);
     };
     return tracker.players
       .filter((p) => showLeft || p.active === 1)
       .filter((p) => !onlyMissedLatest || p.missedLatest)
       .filter((p) => !onlyField || p.fields[field].played > 0)
       .filter((p) => !q || p.ign.toLowerCase().includes(q) || (p.class ?? "").toLowerCase().includes(q))
-      .sort((a, b) => (sortKey === "ign" ? a.ign.localeCompare(b.ign) : value(b) - value(a) || a.ign.localeCompare(b.ign)));
-  }, [tracker, field, search, sortKey, onlyField, onlyMissedLatest, showLeft]);
+      .sort(compare);
+  }, [tracker, field, search, sort, onlyField, onlyMissedLatest, showLeft]);
+
+  function sortBy(key: TrackerSort) {
+    setSort((prev) =>
+      prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: defaultDir(key) }
+    );
+  }
 
   async function toggleLeague(id: number) {
     if (expandedLeague?.id === id) {
@@ -289,8 +350,11 @@ export function GuildLeaguePage() {
               className="min-w-72 flex-1 rounded-lg border border-border bg-panel-alt px-4 py-2.5 text-base text-ink outline-none focus:border-gold"
             />
             <select
-              value={sortKey}
-              onChange={(e) => setSortKey(e.target.value as TrackerSort)}
+              value={sort.key}
+              onChange={(e) => {
+                const key = e.target.value as TrackerSort;
+                setSort({ key, dir: defaultDir(key) });
+              }}
               className="rounded-lg border border-border bg-panel-alt px-4 py-2.5 text-base text-ink outline-none focus:border-gold"
             >
               <option value="attendance">Sort: Attendance</option>
@@ -300,6 +364,7 @@ export function GuildLeaguePage() {
                   Sort: Avg {s.label}
                 </option>
               ))}
+              <option value="lastAttended">Sort: Last attended</option>
               <option value="ign">Sort: Name</option>
             </select>
           </div>
@@ -327,15 +392,13 @@ export function GuildLeaguePage() {
             <table className="w-full min-w-[1100px] border-collapse text-base">
               <thead>
                 <tr className="border-b border-border bg-panel-alt text-left text-sm uppercase tracking-wide text-ink-dim">
-                  <th className={th}>Player</th>
-                  <th className={th}>Attendance</th>
-                  <th className={`${th} text-right`}>{FIELD_LABEL[field]} GLs</th>
+                  <SortHeader label="Player" column="ign" sort={sort} onSort={sortBy} />
+                  <SortHeader label="Attendance" column="attendance" sort={sort} onSort={sortBy} />
+                  <SortHeader label={`${FIELD_LABEL[field]} GLs`} column="played" sort={sort} onSort={sortBy} align="right" />
                   {TRACKER_STATS.map((s) => (
-                    <th key={s.key} className={`${th} text-right`}>
-                      Avg {s.short}
-                    </th>
+                    <SortHeader key={s.key} label={`Avg ${s.short}`} column={s.key} sort={sort} onSort={sortBy} align="right" />
                   ))}
-                  <th className={th}>Last attended</th>
+                  <SortHeader label="Last attended" column="lastAttended" sort={sort} onSort={sortBy} />
                 </tr>
               </thead>
               <tbody>
