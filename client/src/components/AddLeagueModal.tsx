@@ -1,77 +1,67 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api/client";
-import type { LeaguePreviewRow, LeagueResult, Player } from "../types";
+import type { LeagueField, LeaguePreviewRow, LeagueResult, Player, RawLeagueRow } from "../types";
 import { CsvDropzone } from "./CsvDropzone";
 import { RosterPlayerSelect } from "./RosterPlayerSelect";
-import { formatStat, todayIso } from "../lib/format";
+import { formatCount, formatStat, todayIso } from "../lib/format";
+import { guildsInFile, LEAGUE_STATS, readBattleRecordFile, readBattleRecordText } from "../lib/battleRecord";
+import { useAuthStore } from "../store/auth";
 
 interface AddLeagueModalProps {
   players: Player[];
-  onSaved: () => void;
+  onSaved: (field: LeagueField) => void;
   onClose: () => void;
 }
 
-// Pasted into a claude.ai chat together with the battle-record screenshots, so the
-// reply comes back in exactly the format the importer reads.
-const CLAUDE_PROMPT = `These screenshots are the Battle Record of one guild league in Ragnarok: The New World, scrolled from top to bottom.
-Read every player row across all screenshots and reply with ONLY a CSV (no other text), using exactly this header:
-Player,Kill,Assist,Player Damage,Building Damage
-
-Rules:
-- One row per player. Include every player from every screenshot.
-- Skip duplicate rows: the highlighted row at the bottom of each screenshot repeats my own row, and scrolled screenshots overlap.
-- Keep player names exactly as shown, including Japanese/Thai characters and symbols, but leave out icons in front of names.
-- Keep numbers as shown (e.g. 12.3M, 790.0M).`;
-
 type Step = "input" | "review";
-type Source = "screenshots" | "csv";
+// The exporter gives the battle record as an .xlsx file or copies it to the clipboard.
+type Source = "file" | "paste";
 
-interface ReviewRow {
-  ign: string;
+interface ReviewRow extends LeaguePreviewRow {
   // "" = not picked yet, "ignore" = leave this row out, otherwise a player id.
   pick: string;
   autoMatched: boolean;
-  kills: string;
-  assists: string;
-  playerDamage: string;
-  buildingDamage: string;
-  error: string | null;
 }
+
+interface LoadedFile {
+  name: string;
+  rows: RawLeagueRow[];
+  guilds: { name: string; count: number }[];
+}
+
+// Stats shown in the review table; the rest are saved too.
+const REVIEW_STATS = LEAGUE_STATS.filter((s) =>
+  ["kills", "assists", "playerDamage", "buildingDamage", "heal", "deaths"].includes(s.key)
+);
 
 const inputClass =
   "w-full rounded-lg border border-border bg-panel-alt px-3 py-2 text-base text-ink outline-none focus:border-gold";
-const cellInput =
-  "w-24 rounded-md border border-border-soft bg-panel-alt px-2 py-1 text-right font-mono text-sm text-ink outline-none focus:border-gold";
+const labelClass = "text-xs uppercase tracking-wide text-ink-dim";
 
-function toReviewRow(r: LeaguePreviewRow): ReviewRow {
-  return {
-    ign: r.ign,
-    pick: r.playerId != null ? String(r.playerId) : "",
-    autoMatched: r.playerId != null,
-    kills: String(r.kills ?? ""),
-    assists: String(r.assists ?? ""),
-    playerDamage: r.playerDamage != null ? formatStat(r.playerDamage) : "",
-    buildingDamage: r.buildingDamage != null ? formatStat(r.buildingDamage) : "",
-    error: r.error,
-  };
+function choiceClass(selected: boolean) {
+  return [
+    "rounded-lg border px-4 py-2.5 text-base transition-colors",
+    selected ? "border-gold bg-gold/15 font-semibold text-gold" : "border-border text-ink-dim hover:border-gold/50 hover:text-ink",
+  ].join(" ");
 }
 
 export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProps) {
+  const guildName = useAuthStore((s) => s.guild?.name);
   const [step, setStep] = useState<Step>("input");
+  const [field, setField] = useState<LeagueField | null>(null);
   const [date, setDate] = useState(todayIso());
   const [result, setResult] = useState<LeagueResult | "">("");
   const [participants, setParticipants] = useState("");
   const [totalKills, setTotalKills] = useState("");
   const [towers, setTowers] = useState("");
-  const [source, setSource] = useState<Source>("screenshots");
-  const [images, setImages] = useState<File[]>([]);
-  const [fromOcr, setFromOcr] = useState(false);
-  const [csv, setCsv] = useState("");
-  const [fileName, setFileName] = useState<string | null>(null);
+  const [opponent, setOpponent] = useState("");
+  const [source, setSource] = useState<Source>("file");
+  const [pasted, setPasted] = useState("");
+  const [file, setFile] = useState<LoadedFile | null>(null);
+  const [ourGuild, setOurGuild] = useState<string | null>(null);
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -86,24 +76,78 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
     [players]
   );
 
-  function addImages(files: File[]) {
-    setImages((prev) => [...prev, ...files.filter((f) => f.type.startsWith("image/"))]);
+  const ourRows = useMemo(() => (file && ourGuild ? file.rows.filter((r) => r.guild === ourGuild) : []), [file, ourGuild]);
+
+  // Picking our guild fills in the guild's totals and the opponent from the file.
+  function chooseGuild(loaded: LoadedFile, name: string) {
+    setOurGuild(name);
+    const mine = loaded.rows.filter((r) => r.guild === name);
+    setParticipants(String(mine.length));
+    setTotalKills(String(mine.reduce((t, r) => t + (Number(r.kills) || 0), 0)));
+    const others = loaded.guilds.filter((g) => g.name !== name);
+    setOpponent(others.length === 1 ? others[0].name : "");
+  }
+
+  function loadRows(name: string, fileRows: RawLeagueRow[]) {
+    const { guilds, suggested } = guildsInFile(fileRows, guildName);
+    const loaded = { name, rows: fileRows, guilds };
+    setFile(loaded);
+    if (suggested) chooseGuild(loaded, suggested);
+    else {
+      setOurGuild(null);
+      setParticipants("");
+      setTotalKills("");
+      setOpponent("");
+    }
+  }
+
+  function clearRows(err: unknown, fallback: string) {
+    setFile(null);
+    setOurGuild(null);
+    setError(err instanceof Error ? err.message : fallback);
+  }
+
+  function switchSource(next: Source) {
+    if (next === source) return;
+    setSource(next);
+    setFile(null);
+    setOurGuild(null);
+    setPasted("");
     setError(null);
   }
 
-  async function handleFile(file: File) {
-    setCsv(await file.text());
-    setFileName(file.name);
+  async function handleFile(f: File) {
     setError(null);
-  }
-
-  async function copyPrompt() {
+    setBusy(true);
     try {
-      await navigator.clipboard.writeText(CLAUDE_PROMPT);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      loadRows(f.name, await readBattleRecordFile(f));
+    } catch (err) {
+      clearRows(err, "Couldn't read the file");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handlePaste(text: string) {
+    setPasted(text);
+    setError(null);
+    if (!text.trim()) {
+      setFile(null);
+      setOurGuild(null);
+      return;
+    }
+    try {
+      loadRows("the pasted battle record", readBattleRecordText(text));
+    } catch (err) {
+      clearRows(err, "Couldn't read the pasted battle record");
+    }
+  }
+
+  async function pasteFromClipboard() {
+    try {
+      handlePaste(await navigator.clipboard.readText());
     } catch {
-      setError("Couldn't copy — select the prompt text and copy it by hand");
+      setError("The browser blocked reading the clipboard — click the box below and press Ctrl+V instead");
     }
   }
 
@@ -111,14 +155,13 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
     setBusy(true);
     setError(null);
     try {
-      const { rows } = source === "screenshots" ? await api.previewLeagueImages(images) : await api.previewLeague(csv);
-      setRows(rows.map(toReviewRow));
-      setFromOcr(source === "screenshots");
+      const { rows } = await api.previewLeague(ourRows);
+      setRows(
+        rows.map((r) => ({ ...r, pick: r.playerId != null ? String(r.playerId) : "", autoMatched: r.playerId != null }))
+      );
       setStep("review");
     } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : source === "screenshots" ? "Couldn't read the screenshots" : "Couldn't read the CSV"
-      );
+      setError(err instanceof ApiError ? err.message : "Couldn't read the battle record");
     } finally {
       setBusy(false);
     }
@@ -130,33 +173,31 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
 
   const kept = rows.filter((r) => r.pick !== "ignore");
   const unpicked = kept.filter((r) => r.pick === "").length;
+  const unreadable = kept.filter((r) => r.error).length;
   const pickCounts = kept.reduce<Record<string, number>>((acc, r) => {
     if (r.pick) acc[r.pick] = (acc[r.pick] ?? 0) + 1;
     return acc;
   }, {});
   const duplicatePicks = Object.values(pickCounts).some((n) => n > 1);
-  const canSave = kept.length > 0 && unpicked === 0 && !duplicatePicks && !busy;
+  const canSave = kept.length > 0 && unpicked === 0 && unreadable === 0 && !duplicatePicks && !busy && field != null;
+  const canReview = field != null && ourRows.length > 0 && !busy;
 
   async function save() {
+    if (!field) return;
     setBusy(true);
     setError(null);
     try {
       await api.saveLeague({
         date,
+        field,
+        opponent,
         result: result || null,
         participants,
         totalKills,
         towers,
-        rows: kept.map((r) => ({
-          playerId: Number(r.pick),
-          ign: r.ign,
-          kills: r.kills,
-          assists: r.assists,
-          playerDamage: r.playerDamage,
-          buildingDamage: r.buildingDamage,
-        })),
+        rows: kept.map(({ pick, autoMatched: _a, error: _e, playerId: _p, ...line }) => ({ ...line, playerId: Number(pick) })),
       });
-      onSaved();
+      onSaved(field);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't save the league");
     } finally {
@@ -164,20 +205,22 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
     }
   }
 
+  const fieldLabel = field === "main" ? "Main field" : field === "sub" ? "Sub field" : "";
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 pt-20" onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[85vh] w-full max-w-4xl flex-col rounded-2xl border border-border bg-panel shadow-2xl shadow-black/50"
+        className="flex max-h-[85vh] w-full max-w-5xl flex-col rounded-2xl border border-border bg-panel shadow-2xl shadow-black/50"
       >
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border p-4">
           <div>
             <h2 className="text-base font-semibold text-heading">
-              {step === "input" ? "Add guild league" : "Review battle record"}
+              {step === "input" ? "Add guild league" : `Review battle record · ${fieldLabel}`}
             </h2>
             <p className="text-xs text-ink-dim">
               {step === "input"
-                ? "Step 1 of 2 — league details and the battle record"
+                ? "Step 1 of 2 — the field, the battle record and league details"
                 : "Step 2 of 2 — check each row's roster player, then save"}
             </p>
           </div>
@@ -193,161 +236,148 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
 
         {step === "input" ? (
           <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            <div className="flex flex-col gap-2">
+              <span className={labelClass}>Which field is this battle record from?</span>
+              <div className="flex gap-2">
+                {(
+                  [
+                    ["main", "Main field"],
+                    ["sub", "Sub field"],
+                  ] as const
+                ).map(([value, text]) => (
+                  <button key={value} type="button" onClick={() => setField(value)} className={choiceClass(field === value)}>
+                    {text}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <span className={labelClass}>Battle record</span>
+              <div className="flex gap-1 self-start rounded-lg border border-border p-1">
+                {(
+                  [
+                    ["file", "From Excel file"],
+                    ["paste", "From clipboard"],
+                  ] as const
+                ).map(([value, text]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => switchSource(value)}
+                    className={[
+                      "rounded-md px-3 py-1.5 text-sm",
+                      source === value ? "bg-gold font-semibold text-bg" : "text-ink-dim hover:text-ink",
+                    ].join(" ")}
+                  >
+                    {text}
+                  </button>
+                ))}
+              </div>
+              {source === "file" ? (
+                <CsvDropzone
+                  onFiles={(files) => handleFile(files[0])}
+                  busy={busy}
+                  compact
+                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  icon="📊"
+                  label={file ? `Loaded ${file.name} — drop another to replace` : "Drag & drop the battle-record .xlsx here"}
+                />
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm text-ink-dim">
+                      Copy the battle record in the exporter (header row included), then paste it here.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={pasteFromClipboard}
+                      className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-sm text-ink hover:border-gold hover:text-gold"
+                    >
+                      📋 Paste from clipboard
+                    </button>
+                  </div>
+                  <textarea
+                    value={pasted}
+                    onChange={(e) => handlePaste(e.target.value)}
+                    rows={6}
+                    spellCheck={false}
+                    placeholder={"Guild\tPlayer\tJob\tKill\tAssist\tPlayer Damage\tBuilding Damage\t…\n…or press Ctrl+V here"}
+                    className="w-full resize-y whitespace-pre rounded-lg border border-border bg-panel-alt px-3 py-2 font-mono text-sm text-ink outline-none focus:border-gold"
+                  />
+                </div>
+              )}
+            </div>
+
+            {file && (
+              <div className="flex flex-col gap-2 rounded-xl border border-border-soft bg-panel-alt p-4">
+                <p className="text-sm text-ink-dim">
+                  {file.rows.length} players in {source === "file" ? "the file" : "the pasted battle record"}.{" "}
+                  {ourGuild
+                    ? "Only your guild's players are imported."
+                    : `No guild in the file is named “${guildName ?? "?"}” — pick which one is yours.`}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {file.guilds.map((g) => (
+                    <button key={g.name} type="button" onClick={() => chooseGuild(file, g.name)} className={choiceClass(ourGuild === g.name)}>
+                      {g.name}
+                      <span className="ml-2 text-sm font-normal text-ink-dim">{g.count} players</span>
+                      {ourGuild === g.name && <span className="ml-2 text-sm">· your guild</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">
               <label className="col-span-2 flex flex-col gap-1 sm:col-span-1">
-                <span className="text-xs uppercase tracking-wide text-ink-dim">Date</span>
+                <span className={labelClass}>Date</span>
                 <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClass} />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-xs uppercase tracking-wide text-ink-dim">Result</span>
-                <select
-                  value={result}
-                  onChange={(e) => setResult(e.target.value as LeagueResult | "")}
-                  className={inputClass}
-                >
+                <span className={labelClass}>Result</span>
+                <select value={result} onChange={(e) => setResult(e.target.value as LeagueResult | "")} className={inputClass}>
                   <option value="">—</option>
                   <option value="victory">Victory</option>
                   <option value="defeat">Defeat</option>
                 </select>
               </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs uppercase tracking-wide text-ink-dim">Participants</span>
-                <input inputMode="numeric" value={participants} onChange={(e) => setParticipants(e.target.value)} placeholder="59" className={inputClass} />
+              <label className="col-span-2 flex flex-col gap-1 sm:col-span-1">
+                <span className={labelClass}>Opponent</span>
+                <input value={opponent} onChange={(e) => setOpponent(e.target.value)} placeholder="HP" className={inputClass} />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-xs uppercase tracking-wide text-ink-dim">Total kills</span>
+                <span className={labelClass}>Participants</span>
+                <input inputMode="numeric" value={participants} onChange={(e) => setParticipants(e.target.value)} placeholder="60" className={inputClass} />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className={labelClass}>Total kills</span>
                 <input inputMode="numeric" value={totalKills} onChange={(e) => setTotalKills(e.target.value)} placeholder="777" className={inputClass} />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-xs uppercase tracking-wide text-ink-dim">Towers</span>
+                <span className={labelClass}>Towers</span>
                 <input inputMode="numeric" value={towers} onChange={(e) => setTowers(e.target.value)} placeholder="7" className={inputClass} />
               </label>
             </div>
-
-            <div className="flex gap-1 self-start rounded-lg border border-border p-1">
-              {(
-                [
-                  ["screenshots", "Upload screenshots"],
-                  ["csv", "Paste CSV"],
-                ] as const
-              ).map(([value, text]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => {
-                    setSource(value);
-                    setError(null);
-                  }}
-                  className={[
-                    "rounded-md px-3 py-1.5 text-sm",
-                    source === value ? "bg-gold text-bg font-semibold" : "text-ink-dim hover:text-ink",
-                  ].join(" ")}
-                >
-                  {text}
-                </button>
-              ))}
-            </div>
-
-            {source === "screenshots" ? (
-              <div className="flex flex-col gap-3">
-                <p className="text-sm text-ink-dim">
-                  Add every battle-record screenshot for this league, scrolled from top to bottom. They're read with
-                  text recognition in your browser, so check the names and numbers on the next step. The first time on
-                  a device it downloads the reading data, which can take a minute.
-                </p>
-                <CsvDropzone
-                  onFiles={addImages}
-                  busy={busy}
-                  compact
-                  multiple
-                  accept="image/png,image/jpeg,image/webp"
-                  icon="🖼️"
-                  label={images.length > 0 ? "Drop more screenshots to add them" : "Drag & drop the battle-record screenshots here"}
-                />
-                {images.length > 0 && (
-                  <ul className="flex flex-col gap-1">
-                    {images.map((img, i) => (
-                      <li
-                        key={i}
-                        className="flex items-center justify-between gap-2 rounded-lg border border-border-soft bg-panel-alt px-3 py-1.5 text-sm"
-                      >
-                        <span className="truncate text-ink">
-                          {i + 1}. {img.name}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}
-                          className="shrink-0 text-ink-dim hover:text-danger"
-                          aria-label={`Remove ${img.name}`}
-                        >
-                          ×
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ) : (
-              <>
-              <div className="rounded-xl border border-border-soft bg-panel-alt p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-heading">Turn screenshots into the CSV with Claude</p>
-                    <p className="text-sm text-ink-dim">
-                      Open claude.ai, attach all battle-record screenshots for this league, paste this prompt, and save the
-                      reply as a .csv (or paste it below).
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={copyPrompt}
-                    className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-sm text-ink hover:border-gold hover:text-gold"
-                  >
-                    {copied ? "Copied!" : "Copy prompt"}
-                  </button>
-                </div>
-              </div>
-
-              <CsvDropzone
-                onFiles={(files) => handleFile(files[0])}
-                busy={false}
-                compact
-                label={fileName ? `Loaded ${fileName} — drop another to replace` : "Drag & drop the battle-record CSV here"}
-              />
-              <label className="flex flex-col gap-1">
-                <span className="text-xs uppercase tracking-wide text-ink-dim">…or paste the CSV</span>
-                <textarea
-                  value={csv}
-                  onChange={(e) => {
-                    setCsv(e.target.value);
-                    setFileName(null);
-                  }}
-                  rows={6}
-                  placeholder={"Player,Kill,Assist,Player Damage,Building Damage"}
-                  className="w-full resize-y rounded-lg border border-border bg-panel-alt px-3 py-2 font-mono text-sm text-ink outline-none focus:border-gold"
-                />
-              </label>
-              </>
-            )}
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
             <p className="shrink-0 px-4 pt-3 text-sm text-ink-dim">
-              {rows.length} rows · <span className="text-success">{rows.filter((r) => r.autoMatched).length} matched automatically</span>
+              {rows.length} {ourGuild} players · <span className="text-success">{rows.filter((r) => r.autoMatched).length} matched automatically</span>
               {unpicked > 0 && <span className="text-danger"> · {unpicked} need a roster player</span>}
               {rows.length - kept.length > 0 && <span> · {rows.length - kept.length} ignored</span>}
-              {fromOcr && <span> · read from screenshots, so compare the numbers before saving</span>}
             </p>
             <div className="min-h-0 flex-1 overflow-auto p-4">
-              <table className="w-full min-w-[760px] border-collapse text-sm">
+              <table className="w-full min-w-[900px] border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-ink-dim">
-                    <th className="px-2 py-2 font-medium">Name in screenshot</th>
+                    <th className="px-2 py-2 font-medium">Name in file</th>
                     <th className="px-2 py-2 font-medium">Roster player</th>
-                    <th className="px-2 py-2 text-right font-medium">Kills</th>
-                    <th className="px-2 py-2 text-right font-medium">Assists</th>
-                    <th className="px-2 py-2 text-right font-medium">Player dmg</th>
-                    <th className="px-2 py-2 text-right font-medium">Building dmg</th>
+                    {REVIEW_STATS.map((s) => (
+                      <th key={s.key} className="px-2 py-2 text-right font-medium">
+                        {s.short}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -358,6 +388,7 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
                       <tr key={i} className={["border-b border-border-soft", ignored ? "opacity-40" : ""].join(" ")}>
                         <td className="px-2 py-1.5">
                           <span className="text-heading">{r.ign}</span>
+                          {r.job && <span className="ml-2 text-xs text-ink-dim">{r.job}</span>}
                           {r.error && <p className="text-xs text-danger">{r.error}</p>}
                         </td>
                         <td className="px-2 py-1.5">
@@ -367,19 +398,14 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
                             onChange={(pick) => updateRow(i, { pick, autoMatched: false })}
                             className={[
                               "w-52 rounded-md border bg-panel-alt px-2 py-1 text-sm text-ink outline-none focus:border-gold",
-                              (r.pick === "" || clash) ? "border-danger" : r.autoMatched ? "border-success/60" : "border-border",
+                              r.pick === "" || clash ? "border-danger" : r.autoMatched ? "border-success/60" : "border-border",
                             ].join(" ")}
                           />
                           {clash && <p className="text-xs text-danger">Picked for another row too</p>}
                         </td>
-                        {(["kills", "assists", "playerDamage", "buildingDamage"] as const).map((k) => (
-                          <td key={k} className="px-2 py-1.5 text-right">
-                            <input
-                              value={r[k]}
-                              onChange={(e) => updateRow(i, { [k]: e.target.value })}
-                              disabled={ignored}
-                              className={cellInput}
-                            />
+                        {REVIEW_STATS.map((s) => (
+                          <td key={s.key} className={["px-2 py-1.5 text-right font-mono", s.big ? "text-gold" : ""].join(" ")}>
+                            {s.big ? formatStat(r[s.key]) : formatCount(r[s.key])}
                           </td>
                         ))}
                       </tr>
@@ -416,20 +442,29 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
             <button
               type="button"
               onClick={preview}
-              disabled={busy || (source === "screenshots" ? images.length === 0 : !csv.trim())}
+              disabled={!canReview}
+              title={field == null ? "Pick Main field or Sub field" : ourRows.length === 0 ? "Load the battle record and pick your guild" : undefined}
               className="rounded-lg bg-gold px-4 py-2 text-base font-semibold text-bg transition-colors hover:bg-gold-bright disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {busy ? (source === "screenshots" ? "Reading screenshots…" : "Reading…") : "Review →"}
+              {busy ? "Reading…" : "Review →"}
             </button>
           ) : (
             <button
               type="button"
               onClick={save}
               disabled={!canSave}
-              title={unpicked > 0 ? "Pick a roster player (or Ignore) for every row" : duplicatePicks ? "A roster player is picked twice" : undefined}
+              title={
+                unpicked > 0
+                  ? "Pick a roster player (or Ignore) for every row"
+                  : duplicatePicks
+                    ? "A roster player is picked twice"
+                    : unreadable > 0
+                      ? "Ignore the rows flagged in red"
+                      : undefined
+              }
               className="rounded-lg bg-gold px-4 py-2 text-base font-semibold text-bg transition-colors hover:bg-gold-bright disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {busy ? "Saving…" : `Save league (${kept.length} players)`}
+              {busy ? "Saving…" : `Save ${fieldLabel} league (${kept.length} players)`}
             </button>
           )}
         </div>

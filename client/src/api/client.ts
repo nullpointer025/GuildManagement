@@ -9,6 +9,7 @@ import type {
   ImportSummary,
   League,
   LeagueDetail,
+  LeagueField,
   LeaguePreviewRow,
   LeagueResult,
   LeagueSaveRow,
@@ -20,7 +21,8 @@ import type {
   RaidDetail,
   RaidSummary,
   RaidType,
-  TrackerPlayer,
+  RawLeagueRow,
+  TrackerData,
 } from "../types";
 
 const BASE = "/api";
@@ -137,17 +139,14 @@ export const api = {
 
   leagues: () => request<{ leagues: League[] }>("/leagues"),
   league: (id: number) => request<{ league: LeagueDetail }>(`/leagues/${id}`),
-  leagueTracker: () => request<{ leagueCount: number; players: TrackerPlayer[] }>("/leagues/tracker"),
-  previewLeague: (csv: string) =>
-    request<{ rows: LeaguePreviewRow[] }>("/leagues/preview", { method: "POST", body: JSON.stringify({ csv }) }),
-  // OCR runs in the browser (loaded on demand, it's large); only the text rows are sent.
-  previewLeagueImages: async (images: File[]) => {
-    const { readBattleRecordImages } = await import("../lib/leagueOcr");
-    const rows = await readBattleRecordImages(images);
-    return request<{ rows: LeaguePreviewRow[] }>("/leagues/preview-ocr", { method: "POST", body: JSON.stringify({ rows }) });
-  },
+  leagueTracker: () => request<TrackerData>("/leagues/tracker"),
+  // The .xlsx is read in the browser; only our guild's rows are sent, for roster matching.
+  previewLeague: (rows: RawLeagueRow[]) =>
+    request<{ rows: LeaguePreviewRow[] }>("/leagues/preview", { method: "POST", body: JSON.stringify({ rows }) }),
   saveLeague: (payload: {
     date: string;
+    field: LeagueField;
+    opponent: string;
     result: LeagueResult | null;
     participants: string;
     totalKills: string;

@@ -44,7 +44,7 @@ Expects the export's header row to include at least a `Player` column (the IGN).
 
 ## Deploying (Vercel + Supabase)
 
-Vercel serves the built client as static files and runs the API (`server/src/app.js`) as one serverless function, configured in `vercel.json`. Data lives in Supabase Postgres. Battle-record screenshots are read with OCR in the browser, so nothing large is ever uploaded.
+Vercel serves the built client as static files and runs the API (`server/src/app.js`) as one serverless function, configured in `vercel.json`. Data lives in Supabase Postgres. Guild League battle records (the in-game .xlsx export) are read in the browser, so the file itself is never uploaded.
 
 1. **Supabase:** create a project, then run the files in `supabase/migrations/` in order in the SQL editor. Copy the *Transaction pooler* connection string from **Connect**.
 2. **Vercel:** "Add New → Project", import this GitHub repo, keep the root directory as the repo root (`vercel.json` sets the build). Add the environment variables:

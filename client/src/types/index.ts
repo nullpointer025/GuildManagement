@@ -47,9 +47,14 @@ export interface RaidDetail extends Omit<RaidSummary, "partyCounts"> {
 
 export type LeagueResult = "victory" | "defeat";
 
+// Which battlefield an uploaded battle record is from.
+export type LeagueField = "main" | "sub";
+
 export interface League {
   id: number;
   date: string;
+  field: LeagueField;
+  opponent: string | null;
   result: LeagueResult | null;
   participants: number | null;
   total_kills: number | null;
@@ -57,38 +62,66 @@ export interface League {
   recorded: number;
 }
 
-export interface LeagueStatLine {
-  kills: number;
-  assists: number;
-  playerDamage: number;
-  buildingDamage: number;
-}
+export type LeagueStatKey =
+  | "kills"
+  | "assists"
+  | "playerDamage"
+  | "buildingDamage"
+  | "heal"
+  | "endure"
+  | "deaths"
+  | "revives"
+  | "monsters"
+  | "flagRepairs"
+  | "bossKills"
+  | "bossDamage";
+
+// One player's line in a battle record. null = not recorded (leagues imported
+// before the .xlsx export added that column).
+export type LeagueStatLine = { [K in LeagueStatKey]: number | null };
 
 export interface LeaguePlayerStat extends LeagueStatLine {
   playerId: number;
   rosterIgn: string;
   class: string | null;
   ign: string;
+  job: string | null;
 }
 
 export interface LeagueDetail extends Omit<League, "recorded"> {
   stats: LeaguePlayerStat[];
 }
 
-// One battle-record row read from the CSV, with the roster player it was matched to.
+// One row of the battle-record .xlsx, as text.
+export type RawLeagueRow = { guild: string; ign: string; job: string } & { [K in LeagueStatKey]: string };
+
+// One of our guild's battle-record rows, with the roster player it was matched to.
 export interface LeaguePreviewRow extends LeagueStatLine {
   ign: string;
+  job: string | null;
   playerId: number | null;
   error: string | null;
 }
 
-export interface LeagueSaveRow {
+export interface LeagueSaveRow extends LeagueStatLine {
   playerId: number;
   ign: string;
-  kills: string;
-  assists: string;
-  playerDamage: string;
-  buildingDamage: string;
+  job: string | null;
+}
+
+export interface TrackerFieldSummary {
+  played: number;
+  totals: LeagueStatLine;
+  averages: LeagueStatLine;
+}
+
+export interface TrackerHistoryLine extends LeagueStatLine {
+  leagueId: number;
+  date: string;
+  field: LeagueField;
+  opponent: string | null;
+  ign: string;
+  job: string | null;
 }
 
 export interface TrackerPlayer {
@@ -96,12 +129,18 @@ export interface TrackerPlayer {
   ign: string;
   class: string | null;
   active: number;
+  // Guild league dates attended, in either field.
   attended: number;
   missedLatest: boolean;
   lastAttended: string | null;
-  totals: LeagueStatLine;
-  averages: { [K in keyof LeagueStatLine]: number | null };
-  history: (LeagueStatLine & { leagueId: number; date: string; ign: string })[];
+  fields: Record<LeagueField, TrackerFieldSummary>;
+  history: TrackerHistoryLine[];
+}
+
+export interface TrackerData {
+  leagueDates: number;
+  fieldCounts: Record<LeagueField, number>;
+  players: TrackerPlayer[];
 }
 
 // A saved group of up to 5 players that can be dropped into any raid's parties.
