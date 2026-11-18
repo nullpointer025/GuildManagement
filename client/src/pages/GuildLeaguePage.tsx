@@ -4,6 +4,7 @@ import type {
   League,
   LeagueDetail,
   LeagueField,
+  LeagueSession,
   LeagueStatKey,
   LeagueStatLine,
   Player,
@@ -85,6 +86,11 @@ function ResultBadge({ result }: { result: League["result"] }) {
   ) : (
     <span className="rounded-full bg-danger/15 px-2.5 py-1 text-sm text-danger">Defeat</span>
   );
+}
+
+// "1st GL" / "2nd GL": which of the day's guild leagues a record is from.
+function SessionTag({ session }: { session: LeagueSession }) {
+  return <span className="ml-2 text-xs font-normal text-ink-dim">{session === 1 ? "1st" : "2nd"} GL</span>;
 }
 
 function FieldBadge({ field }: { field: LeagueField }) {
@@ -173,6 +179,7 @@ function PlayerHistory({ player }: { player: TrackerPlayer }) {
             <tr key={h.leagueId} className="border-t border-border-soft">
               <td className="py-1.5 pr-4 whitespace-nowrap text-ink">
                 {formatDate(h.date)}
+                <SessionTag session={h.session} />
                 {h.opponent && <span className="ml-2 text-xs text-ink-dim">vs {h.opponent}</span>}
               </td>
               <td className="py-1.5 pr-4">
@@ -190,7 +197,7 @@ function PlayerHistory({ player }: { player: TrackerPlayer }) {
 
 export function GuildLeaguePage() {
   const [tab, setTab] = useState<Tab>("tracker");
-  const [tracker, setTracker] = useState<TrackerData>({ leagueDates: 0, fieldCounts: { main: 0, sub: 0 }, players: [] });
+  const [tracker, setTracker] = useState<TrackerData>({ leagueCount: 0, fieldCounts: { main: 0, sub: 0 }, players: [] });
   const [leagues, setLeagues] = useState<League[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
@@ -221,7 +228,7 @@ export function GuildLeaguePage() {
     load();
   }, []);
 
-  const { leagueDates, fieldCounts } = tracker;
+  const { leagueCount, fieldCounts } = tracker;
 
   const trackerRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -285,9 +292,9 @@ export function GuildLeaguePage() {
         <div>
           <h1 className="text-3xl font-bold text-heading">Guild League</h1>
           <p className="mt-1.5 text-base text-ink-dim">
-            {leagueDates} league date{leagueDates === 1 ? "" : "s"} · {fieldCounts.main} Main / {fieldCounts.sub} Sub
+            {leagueCount} guild league{leagueCount === 1 ? "" : "s"} · {fieldCounts.main} Main / {fieldCounts.sub} Sub
             battle record{fieldCounts.main + fieldCounts.sub === 1 ? "" : "s"}
-            {leagueDates > 0 && (
+            {leagueCount > 0 && (
               <>
                 {" · "}
                 <span className={missedLatestCount > 0 ? "text-danger" : "text-success"}>
@@ -405,12 +412,12 @@ export function GuildLeaguePage() {
                 {trackerRows.length === 0 && (
                   <tr>
                     <td colSpan={trackerCols} className="px-5 py-10 text-center text-ink-dim">
-                      {leagueDates === 0 ? "No leagues yet — upload a battle record to start tracking." : "No matching players."}
+                      {leagueCount === 0 ? "No leagues yet — upload a battle record to start tracking." : "No matching players."}
                     </td>
                   </tr>
                 )}
                 {trackerRows.map((p) => {
-                  const pct = leagueDates > 0 ? Math.round((p.attended / leagueDates) * 100) : 0;
+                  const pct = leagueCount > 0 ? Math.round((p.attended / leagueCount) * 100) : 0;
                   const open = expandedPlayer === p.id;
                   const summary = p.fields[field];
                   return (
@@ -427,12 +434,12 @@ export function GuildLeaguePage() {
                           <span className="ml-2 text-sm text-ink-dim">{p.class ?? ""}</span>
                         </td>
                         <td className={`${td} whitespace-nowrap`}>
-                          {leagueDates === 0 ? (
+                          {leagueCount === 0 ? (
                             <span className="text-ink-dim">—</span>
                           ) : (
                             <>
                               <span className={attendanceColor(pct)}>
-                                {p.attended}/{leagueDates}
+                                {p.attended}/{leagueCount}
                               </span>
                               <span className="ml-2 text-sm text-ink-dim">{pct}%</span>
                               {p.missedLatest && (
@@ -494,7 +501,10 @@ export function GuildLeaguePage() {
                 return (
                   <Fragment key={l.id}>
                     <tr onClick={() => toggleLeague(l.id)} className="cursor-pointer border-b border-border-soft hover:bg-panel-alt/60">
-                      <td className={`${td} font-medium text-heading`}>{formatDate(l.date)}</td>
+                      <td className={`${td} whitespace-nowrap font-medium text-heading`}>
+                        {formatDate(l.date)}
+                        <SessionTag session={l.session} />
+                      </td>
                       <td className={td}>
                         <FieldBadge field={l.field} />
                       </td>

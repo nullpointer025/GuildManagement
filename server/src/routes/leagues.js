@@ -9,7 +9,9 @@ leaguesRouter.use(requireAccess);
 
 const RESULTS = ["victory", "defeat"];
 const MAX_ROWS = 2000;
-const MAX_LEAGUES_PER_DATE = 2;
+// Up to two guild leagues are fought a day, and each can give more than one export
+// per field, so a date holds at most this many battle records per field.
+const MAX_RECORDS_PER_DATE_FIELD = 4;
 
 // guild_league_stats columns as camelCase API keys. Postgres folds unquoted
 // aliases to lower case, so they're quoted.
@@ -45,6 +47,11 @@ leaguesRouter.post("/", async (req, res) => {
   }
   if (!LEAGUE_FIELDS.includes(body.field)) {
     return res.status(400).json({ error: "Pick whether this battle record is from the Main or the Sub field" });
+  }
+  // Which of the day's guild leagues (1st or 2nd) this record is from.
+  const session = body.session == null ? 1 : Number(body.session);
+  if (session !== 1 && session !== 2) {
+    return res.status(400).json({ error: "Pick whether this is the 1st or the 2nd guild league of the day" });
   }
   const result = body.result || null;
   if (result != null && !RESULTS.includes(result)) return res.status(400).json({ error: "Invalid result" });
@@ -84,24 +91,25 @@ leaguesRouter.post("/", async (req, res) => {
     return res.status(400).json({ error: "The same name appears in two rows" });
   }
 
-  // At most two guild leagues are fought on one date.
   const sameDate = await db.get(
-    "SELECT COUNT(*) AS n FROM guild_leagues WHERE guild_id = ? AND date = ?",
+    "SELECT COUNT(*) AS n FROM guild_leagues WHERE guild_id = ? AND date = ? AND field = ?",
     req.guild.id,
-    body.date
+    body.date,
+    body.field
   );
-  if (sameDate.n >= MAX_LEAGUES_PER_DATE) {
+  if (sameDate.n >= MAX_RECORDS_PER_DATE_FIELD) {
     return res.status(409).json({
-      error: `${MAX_LEAGUES_PER_DATE} guild leagues are already saved on this date — delete one first to replace it`,
+      error: `${MAX_RECORDS_PER_DATE_FIELD} ${body.field === "main" ? "Main" : "Sub"} field battle records are already saved on this date — delete one first to replace it`,
     });
   }
 
   const id = await transaction(async () => {
     const info = await db.run(
-      `INSERT INTO guild_leagues (guild_id, date, field, opponent, result, participants, total_kills, towers)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+      `INSERT INTO guild_leagues (guild_id, date, session, field, opponent, result, participants, total_kills, towers)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
       req.guild.id,
       body.date,
+      session,
       body.field,
       opponent,
       result,
@@ -145,7 +153,7 @@ leaguesRouter.get("/", async (req, res) => {
             (SELECT COUNT(*) FROM guild_league_pending p WHERE p.league_id = l.id) AS pending
      FROM guild_leagues l
      WHERE l.guild_id = ?
-     ORDER BY l.date DESC, l.field ASC, l.id DESC`,
+     ORDER BY l.date DESC, l.session DESC, l.field ASC, l.id DESC`,
     req.guild.id
   );
   res.json({ leagues });
@@ -166,12 +174,13 @@ function summarize(history) {
   return { played: history.length, totals, averages };
 }
 
-// Per-player attendance and stats. Attendance counts guild league dates (Main or
-// Sub, either one counts); stats are kept apart per field. Covers everyone still in
+// Per-player attendance and stats. Attendance counts guild leagues — a date and
+// which of that day's leagues (1st or 2nd) — where fighting in the Main or the Sub
+// field counts; stats are kept apart per field. Covers everyone still in
 // the guild, plus anyone who has left but has league history.
 leaguesRouter.get("/tracker", async (req, res) => {
   const leagues = await db.all(
-    "SELECT id, date, field, opponent FROM guild_leagues WHERE guild_id = ? ORDER BY date DESC, field ASC, id DESC",
+    "SELECT id, date, session, field, opponent FROM guild_leagues WHERE guild_id = ? ORDER BY date DESC, session DESC, field ASC, id DESC",
     req.guild.id
   );
   const stats = await db.all(
@@ -182,8 +191,10 @@ leaguesRouter.get("/tracker", async (req, res) => {
   const allPlayers = await db.all("SELECT id, ign, class, active FROM players WHERE guild_id = ?", req.guild.id);
 
   const leagueById = new Map(leagues.map((l, i) => [l.id, { ...l, order: i }]));
-  const dates = [...new Set(leagues.map((l) => l.date))];
-  const latestDate = dates[0];
+  // One guild league = one date + session, however many exports it has.
+  const leagueKey = (l) => `${l.date}#${l.session}`;
+  const guildLeagues = [...new Set(leagues.map(leagueKey))];
+  const latestLeague = guildLeagues[0];
   const byPlayer = new Map();
   for (const s of stats) {
     if (!byPlayer.has(s.player_id)) byPlayer.set(s.player_id, []);
@@ -197,16 +208,23 @@ leaguesRouter.get("/tracker", async (req, res) => {
         .sort((a, b) => leagueById.get(a.league_id).order - leagueById.get(b.league_id).order)
         .map(({ league_id, player_id, ...line }) => {
           const league = leagueById.get(league_id);
-          return { leagueId: league_id, date: league.date, field: league.field, opponent: league.opponent, ...line };
+          return {
+            leagueId: league_id,
+            date: league.date,
+            session: league.session,
+            field: league.field,
+            opponent: league.opponent,
+            ...line,
+          };
         });
-      const attendedDates = new Set(history.map((h) => h.date));
+      const attended = new Set(history.map(leagueKey));
       return {
         id: p.id,
         ign: p.ign,
         class: p.class,
         active: p.active,
-        attended: attendedDates.size,
-        missedLatest: latestDate != null && !attendedDates.has(latestDate),
+        attended: attended.size,
+        missedLatest: latestLeague != null && !attended.has(latestLeague),
         lastAttended: history[0]?.date ?? null,
         fields: {
           main: summarize(history.filter((h) => h.field === "main")),
@@ -217,7 +235,7 @@ leaguesRouter.get("/tracker", async (req, res) => {
     });
 
   res.json({
-    leagueDates: dates.length,
+    leagueCount: guildLeagues.length,
     fieldCounts: {
       main: leagues.filter((l) => l.field === "main").length,
       sub: leagues.filter((l) => l.field === "sub").length,

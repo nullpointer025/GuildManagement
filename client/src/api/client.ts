@@ -13,6 +13,7 @@ import type {
   LeaguePreviewRow,
   LeagueResult,
   LeagueSaveRow,
+  LeagueSession,
   PermaParty,
   PermaPartyAssignment,
   Player,
@@ -145,6 +146,7 @@ export const api = {
     request<{ rows: LeaguePreviewRow[] }>("/leagues/preview", { method: "POST", body: JSON.stringify({ rows }) }),
   saveLeague: (payload: {
     date: string;
+    session: LeagueSession;
     field: LeagueField;
     opponent: string;
     result: LeagueResult | null;

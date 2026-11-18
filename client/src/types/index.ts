@@ -50,9 +50,14 @@ export type LeagueResult = "victory" | "defeat";
 // Which battlefield an uploaded battle record is from.
 export type LeagueField = "main" | "sub";
 
+// Up to two guild leagues are fought a day.
+export type LeagueSession = 1 | 2;
+
 export interface League {
   id: number;
   date: string;
+  // Which of the day's guild leagues (1st or 2nd) this battle record is from.
+  session: LeagueSession;
   field: LeagueField;
   opponent: string | null;
   result: LeagueResult | null;
@@ -128,6 +133,7 @@ export interface TrackerFieldSummary {
 export interface TrackerHistoryLine extends LeagueStatLine {
   leagueId: number;
   date: string;
+  session: LeagueSession;
   field: LeagueField;
   opponent: string | null;
   ign: string;
@@ -139,7 +145,7 @@ export interface TrackerPlayer {
   ign: string;
   class: string | null;
   active: number;
-  // Guild league dates attended, in either field.
+  // Guild leagues attended (a date + 1st/2nd league), in either field.
   attended: number;
   missedLatest: boolean;
   lastAttended: string | null;
@@ -148,7 +154,8 @@ export interface TrackerPlayer {
 }
 
 export interface TrackerData {
-  leagueDates: number;
+  // Guild leagues recorded: each date + 1st/2nd league counts once, however many exports.
+  leagueCount: number;
   fieldCounts: Record<LeagueField, number>;
   players: TrackerPlayer[];
 }

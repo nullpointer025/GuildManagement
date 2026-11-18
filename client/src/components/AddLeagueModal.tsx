@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api/client";
-import type { LeagueField, LeaguePreviewRow, LeagueResult, Player, RawLeagueRow } from "../types";
+import type { LeagueField, LeaguePreviewRow, LeagueSession, LeagueResult, Player, RawLeagueRow } from "../types";
 import { CsvDropzone } from "./CsvDropzone";
 import { RosterPlayerSelect } from "./RosterPlayerSelect";
 import { formatCount, formatStat, todayIso } from "../lib/format";
@@ -49,6 +49,7 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
   const guildName = useAuthStore((s) => s.guild?.name);
   const [step, setStep] = useState<Step>("input");
   const [field, setField] = useState<LeagueField | null>(null);
+  const [session, setSession] = useState<LeagueSession>(1);
   const [date, setDate] = useState(todayIso());
   const [result, setResult] = useState<LeagueResult | "">("");
   const [opponent, setOpponent] = useState("");
@@ -181,6 +182,7 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
     try {
       await api.saveLeague({
         date,
+        session,
         field,
         opponent,
         result: result || null,
@@ -242,6 +244,26 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <span className={labelClass}>Which guild league of the day?</span>
+              <div className="flex gap-2">
+                {(
+                  [
+                    [1, "1st guild league"],
+                    [2, "2nd guild league"],
+                  ] as const
+                ).map(([value, text]) => (
+                  <button key={value} type="button" onClick={() => setSession(value)} className={choiceClass(session === value)}>
+                    {text}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-ink-dim">
+                Upload every Main and Sub export of the same league under the same choice — attendance counts each guild
+                league once.
+              </p>
             </div>
 
             <div className="flex flex-col gap-2">
