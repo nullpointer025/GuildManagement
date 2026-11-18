@@ -150,7 +150,6 @@ export const api = {
     result: LeagueResult | null;
     participants: string;
     totalKills: string;
-    towers: string;
     rows: LeagueSaveRow[];
   }) => request<{ id: number }>("/leagues", { method: "POST", body: JSON.stringify(payload) }),
   deleteLeague: (id: number) => request<{ ok: true }>(`/leagues/${id}`, { method: "DELETE" }),

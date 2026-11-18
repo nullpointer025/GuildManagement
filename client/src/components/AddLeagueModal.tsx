@@ -51,9 +51,6 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
   const [field, setField] = useState<LeagueField | null>(null);
   const [date, setDate] = useState(todayIso());
   const [result, setResult] = useState<LeagueResult | "">("");
-  const [participants, setParticipants] = useState("");
-  const [totalKills, setTotalKills] = useState("");
-  const [towers, setTowers] = useState("");
   const [opponent, setOpponent] = useState("");
   const [source, setSource] = useState<Source>("file");
   const [pasted, setPasted] = useState("");
@@ -78,12 +75,9 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
 
   const ourRows = useMemo(() => (file && ourGuild ? file.rows.filter((r) => r.guild === ourGuild) : []), [file, ourGuild]);
 
-  // Picking our guild fills in the guild's totals and the opponent from the file.
+  // Picking our guild fills in the enemy guild: the other guild in the battle record.
   function chooseGuild(loaded: LoadedFile, name: string) {
     setOurGuild(name);
-    const mine = loaded.rows.filter((r) => r.guild === name);
-    setParticipants(String(mine.length));
-    setTotalKills(String(mine.reduce((t, r) => t + (Number(r.kills) || 0), 0)));
     const others = loaded.guilds.filter((g) => g.name !== name);
     setOpponent(others.length === 1 ? others[0].name : "");
   }
@@ -95,8 +89,6 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
     if (suggested) chooseGuild(loaded, suggested);
     else {
       setOurGuild(null);
-      setParticipants("");
-      setTotalKills("");
       setOpponent("");
     }
   }
@@ -192,9 +184,9 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
         field,
         opponent,
         result: result || null,
-        participants,
-        totalKills,
-        towers,
+        // Our guild's participants and total kills come straight from the battle record.
+        participants: String(ourRows.length),
+        totalKills: String(ourRows.reduce((t, r) => t + (Number(r.kills) || 0), 0)),
         rows: kept.map(({ pick, autoMatched: _a, error: _e, playerId: _p, ...line }) => ({ ...line, playerId: Number(pick) })),
       });
       onSaved(field);
@@ -257,7 +249,7 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
               <div className="flex gap-1 self-start rounded-lg border border-border p-1">
                 {(
                   [
-                    ["file", "From Excel file"],
+                    ["file", "From file (.xlsx / .csv)"],
                     ["paste", "From clipboard"],
                   ] as const
                 ).map(([value, text]) => (
@@ -279,9 +271,9 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
                   onFiles={(files) => handleFile(files[0])}
                   busy={busy}
                   compact
-                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
                   icon="📊"
-                  label={file ? `Loaded ${file.name} — drop another to replace` : "Drag & drop the battle-record .xlsx here"}
+                  label={file ? `Loaded ${file.name} — drop another to replace` : "Drag & drop the battle-record .xlsx or .csv here"}
                 />
               ) : (
                 <div className="flex flex-col gap-2">
@@ -329,8 +321,21 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">
-              <label className="col-span-2 flex flex-col gap-1 sm:col-span-1">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <label className="col-span-2 flex flex-col gap-1">
+                <span className={labelClass}>Enemy guild name</span>
+                <input
+                  value={opponent}
+                  onChange={(e) => setOpponent(e.target.value)}
+                  list="enemy-guilds"
+                  placeholder="The guild you fought"
+                  className={inputClass}
+                />
+                <datalist id="enemy-guilds">
+                  {file?.guilds.filter((g) => g.name !== ourGuild).map((g) => <option key={g.name} value={g.name} />)}
+                </datalist>
+              </label>
+              <label className="flex flex-col gap-1">
                 <span className={labelClass}>Date</span>
                 <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClass} />
               </label>
@@ -341,22 +346,6 @@ export function AddLeagueModal({ players, onSaved, onClose }: AddLeagueModalProp
                   <option value="victory">Victory</option>
                   <option value="defeat">Defeat</option>
                 </select>
-              </label>
-              <label className="col-span-2 flex flex-col gap-1 sm:col-span-1">
-                <span className={labelClass}>Opponent</span>
-                <input value={opponent} onChange={(e) => setOpponent(e.target.value)} placeholder="HP" className={inputClass} />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className={labelClass}>Participants</span>
-                <input inputMode="numeric" value={participants} onChange={(e) => setParticipants(e.target.value)} placeholder="60" className={inputClass} />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className={labelClass}>Total kills</span>
-                <input inputMode="numeric" value={totalKills} onChange={(e) => setTotalKills(e.target.value)} placeholder="777" className={inputClass} />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className={labelClass}>Towers</span>
-                <input inputMode="numeric" value={towers} onChange={(e) => setTowers(e.target.value)} placeholder="7" className={inputClass} />
               </label>
             </div>
           </div>

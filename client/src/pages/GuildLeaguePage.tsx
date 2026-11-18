@@ -410,11 +410,10 @@ export function GuildLeaguePage() {
               <tr className="border-b border-border bg-panel-alt text-left text-sm uppercase tracking-wide text-ink-dim">
                 <th className={th}>Date</th>
                 <th className={th}>Field</th>
-                <th className={th}>Opponent</th>
+                <th className={th}>Enemy guild</th>
                 <th className={th}>Result</th>
                 <th className={`${th} text-right`}>Participants</th>
                 <th className={`${th} text-right`}>Total Kills</th>
-                <th className={`${th} text-right`}>Towers</th>
                 <th className={`${th} text-right`}>Roster players recorded</th>
                 <th className={th} />
               </tr>
@@ -422,7 +421,7 @@ export function GuildLeaguePage() {
             <tbody>
               {leagues.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-5 py-10 text-center text-ink-dim">
+                  <td colSpan={8} className="px-5 py-10 text-center text-ink-dim">
                     No leagues yet — upload a battle record to start tracking.
                   </td>
                 </tr>
@@ -442,7 +441,6 @@ export function GuildLeaguePage() {
                       </td>
                       <td className={`${td} text-right font-mono`}>{formatCount(l.participants)}</td>
                       <td className={`${td} text-right font-mono`}>{formatCount(l.total_kills)}</td>
-                      <td className={`${td} text-right font-mono`}>{formatCount(l.towers)}</td>
                       <td className={`${td} text-right font-mono`}>{l.recorded}</td>
                       <td className={`${td} text-right`} onClick={(e) => e.stopPropagation()}>
                         {confirmDeleteId === l.id ? (
@@ -468,7 +466,7 @@ export function GuildLeaguePage() {
                     </tr>
                     {open && (
                       <tr className="border-b border-border-soft bg-panel">
-                        <td colSpan={9} className="max-w-0 px-8 py-4">
+                        <td colSpan={8} className="max-w-0 px-8 py-4">
                           <div className="overflow-x-auto">
                             <table className="w-max text-sm">
                               <thead>

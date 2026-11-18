@@ -49,9 +49,10 @@ function fieldFor(header: string): keyof RawLeagueRow | undefined {
   return HEADERS[h] ?? HEADERS[h.replace(/s$/, "")];
 }
 
-// Reads the battle-record export (.xlsx, one row per player of both guilds).
+// Reads the battle-record export (.xlsx or .csv, one row per player of both guilds).
 export async function readBattleRecordFile(file: File): Promise<RawLeagueRow[]> {
-  if (!/\.xlsx$/i.test(file.name)) throw new Error("Pick the .xlsx battle-record export");
+  if (/\.csv$/i.test(file.name)) return readBattleRecordText(await file.text());
+  if (!/\.xlsx$/i.test(file.name)) throw new Error("Pick the battle-record export (.xlsx or .csv)");
   return rowsFromSheet(await readFirstSheet(file));
 }
 
