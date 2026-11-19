@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { db, transaction } from "../db.js";
-import { requireAccess } from "../auth.js";
+import { requireAccess, officerWrites } from "../auth.js";
 import { LEAGUE_FIELDS, LEAGUE_STATS, parseLeagueRows, parseRowStats } from "../leagueImport.js";
 import { createRosterMatcher } from "../nameMatch.js";
 
 export const leaguesRouter = Router();
 leaguesRouter.use(requireAccess);
+// Viewers can look but not change anything.
+leaguesRouter.use(officerWrites);
 
 const RESULTS = ["victory", "defeat"];
 const MAX_ROWS = 2000;

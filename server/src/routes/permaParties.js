@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { db, transaction } from "../db.js";
-import { requireAccess } from "../auth.js";
+import { requireAccess, requireOfficer } from "../auth.js";
 
 export const permaPartiesRouter = Router();
 permaPartiesRouter.use(requireAccess);
+// Perma parties are officer-only: viewers don't see them at all.
+permaPartiesRouter.use(requireOfficer);
 
 const MAX_MEMBERS = 5;
 

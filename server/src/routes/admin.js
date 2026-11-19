@@ -8,7 +8,7 @@ import {
   signAdminToken,
 } from "../auth.js";
 
-// Site admin: create guilds, rename them, rotate invite codes, delete them.
+// Site admin: create guilds, rename them, rotate invite and viewer codes, delete them.
 // Unlocked with the ADMIN_CODE env var.
 export const adminRouter = Router();
 
@@ -35,7 +35,7 @@ adminRouter.get("/me", (req, res) => res.json({ admin: true }));
 
 function listGuilds() {
   return db.all(
-    `SELECT g.id, g.name, g.invite_code AS "inviteCode",
+    `SELECT g.id, g.name, g.invite_code AS "inviteCode", g.viewer_code AS "viewerCode",
             CASE WHEN g.discord_sync_enabled THEN g.discord_guild_id END AS "discordGuildId",
             g.created_at AS "createdAt",
             (SELECT COUNT(*) FROM players p WHERE p.guild_id = g.id AND p.active = 1) AS "activePlayers",
@@ -56,19 +56,38 @@ async function parseGuild(body, ownId = null) {
   }
   if (ownId == null || "inviteCode" in body) {
     const code = typeof body.inviteCode === "string" ? body.inviteCode.trim() : "";
-    if (code.length < MIN_CODE_LENGTH) {
-      return { error: `Invite code must be at least ${MIN_CODE_LENGTH} characters` };
-    }
-    if (code.length > 100) return { error: "Invite code must be 100 characters or fewer" };
-    const taken = await db.get(
-      "SELECT id FROM guilds WHERE invite_code = ? AND id IS DISTINCT FROM ?::bigint",
-      code,
-      ownId
-    );
-    if (taken) return { error: "Another guild already uses that invite code" };
+    const error = await checkCode(code, "Invite code", ownId, "invite_code");
+    if (error) return { error };
     values.invite_code = code;
   }
+  // The viewer code is optional: empty means the guild has no view-only access.
+  if ("viewerCode" in body) {
+    const code = typeof body.viewerCode === "string" ? body.viewerCode.trim() : "";
+    if (code) {
+      const error = await checkCode(code, "Viewer code", ownId, "viewer_code");
+      if (error) return { error };
+    }
+    values.viewer_code = code || null;
+  }
+  if (values.viewer_code && values.viewer_code === (values.invite_code ?? body.currentInviteCode)) {
+    return { error: "The viewer code must be different from the invite code" };
+  }
   return { values };
+}
+
+// A code picks both the guild and the role, so it must be unique across every
+// guild's invite and viewer codes (except the column it is replacing).
+async function checkCode(code, label, ownId, column) {
+  if (code.length < MIN_CODE_LENGTH) return `${label} must be at least ${MIN_CODE_LENGTH} characters`;
+  if (code.length > 100) return `${label} must be 100 characters or fewer`;
+  const taken = await db.all(
+    "SELECT id, invite_code, viewer_code FROM guilds WHERE invite_code = ? OR viewer_code = ?",
+    code,
+    code
+  );
+  const conflict = taken.some((g) => g.id !== ownId || g[column] !== code);
+  if (conflict) return "That code is already in use";
+  return null;
 }
 
 adminRouter.get("/guilds", async (req, res) => {
@@ -78,26 +97,34 @@ adminRouter.get("/guilds", async (req, res) => {
 adminRouter.post("/guilds", async (req, res) => {
   const parsed = await parseGuild(req.body ?? {});
   if (parsed.error) return res.status(400).json({ error: parsed.error });
-  const { name, invite_code } = parsed.values;
-  await db.run("INSERT INTO guilds (name, invite_code) VALUES (?, ?)", name, invite_code);
+  const { name, invite_code, viewer_code = null } = parsed.values;
+  await db.run(
+    "INSERT INTO guilds (name, invite_code, viewer_code) VALUES (?, ?, ?)",
+    name,
+    invite_code,
+    viewer_code
+  );
   res.status(201).json({ guilds: await listGuilds() });
 });
 
 adminRouter.patch("/guilds/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const guild = await db.get("SELECT id, invite_code FROM guilds WHERE id = ?", id);
+  const guild = await db.get("SELECT id, invite_code, viewer_code FROM guilds WHERE id = ?", id);
   if (!guild) return res.status(404).json({ error: "Guild not found" });
 
-  const parsed = await parseGuild(req.body ?? {}, id);
+  const parsed = await parseGuild({ ...(req.body ?? {}), currentInviteCode: guild.invite_code }, id);
   if (parsed.error) return res.status(400).json({ error: parsed.error });
   const entries = Object.entries(parsed.values);
   if (entries.length === 0) return res.status(400).json({ error: "Nothing to update" });
 
-  // A new invite code signs everyone out of this guild.
+  // A new invite code signs the guild's officers out; a new (or removed) viewer
+  // code signs its viewers out.
   const rotate = "invite_code" in parsed.values && parsed.values.invite_code !== guild.invite_code;
+  const rotateViewers = "viewer_code" in parsed.values && parsed.values.viewer_code !== guild.viewer_code;
   await db.run(
     `UPDATE guilds SET ${entries.map(([k]) => `${k} = ?`).join(", ")},
-       ${rotate ? "session_version = session_version + 1," : ""} updated_at = now_text()
+       ${rotate ? "session_version = session_version + 1," : ""}
+       ${rotateViewers ? "viewer_session_version = viewer_session_version + 1," : ""} updated_at = now_text()
      WHERE id = ?`,
     ...entries.map(([, v]) => v),
     id

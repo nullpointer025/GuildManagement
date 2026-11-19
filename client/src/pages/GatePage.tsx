@@ -17,7 +17,7 @@ export function GatePage() {
     setLoading(true);
     try {
       await api.enter(code);
-      setUnlocked(true);
+      await setUnlocked(true);
       navigate("/roster");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't enter, please try again");
@@ -27,9 +27,9 @@ export function GatePage() {
   }
 
   return (
-    <AuthShell title="Guild Manager" subtitle="Enter the guild invite code to access the roster and raid teams.">
+    <AuthShell title="Guild Manager" subtitle="Enter your guild's invite code or viewer code to access the roster and raid teams.">
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-        <Field label="Guild invite code">
+        <Field label="Guild code">
           <input
             value={code}
             onChange={(e) => setCode(e.target.value)}

@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { useAuthStore } from "../store/auth";
+import { useAuthStore, useIsOfficer } from "../store/auth";
 import { GuildSettingsModal } from "./GuildSettingsModal";
 
 export function Navbar() {
   const logout = useAuthStore((s) => s.logout);
   const guild = useAuthStore((s) => s.guild);
+  const isOfficer = useIsOfficer();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const navigate = useNavigate();
 
@@ -40,7 +41,15 @@ export function Navbar() {
           </nav>
         </div>
         <div className="flex items-center gap-4">
-          {guild && (
+          {guild && !isOfficer && (
+            <span className="flex items-center gap-2 px-3 py-2 text-base font-medium text-gold">
+              {guild.name}
+              <span className="rounded-full border border-border px-2.5 py-0.5 text-xs uppercase tracking-wide text-ink-dim">
+                View only
+              </span>
+            </span>
+          )}
+          {guild && isOfficer && (
             <button
               onClick={() => setSettingsOpen(true)}
               title="Guild settings"

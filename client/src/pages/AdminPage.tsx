@@ -120,6 +120,7 @@ function GuildAdmin({ onLogout }: { onLogout: () => void }) {
               <tr>
                 <th className="p-3">Guild</th>
                 <th className="p-3">Invite code</th>
+                <th className="p-3">Viewer code</th>
                 <th className="p-3">Discord sync</th>
                 <th className="p-3 text-right">Active players</th>
                 <th className="p-3 text-right">Raids</th>
@@ -135,8 +136,10 @@ function GuildAdmin({ onLogout }: { onLogout: () => void }) {
         </div>
       )}
       <p className="mt-4 text-sm text-ink-dim">
-        Changing a guild's invite code signs all of its officers out; they get back in with the new code. Deleting a
-        guild deletes its roster, raids, perma parties and league history.
+        The invite code gives officers full access. The optional viewer code gives guild members view-only access: they
+        can see the roster, raid parties and guild league history but can't change anything. Changing either code signs
+        out everyone using the old one; leave the viewer code empty to turn view-only access off. Deleting a guild
+        deletes its roster, raids, perma parties and league history.
       </p>
     </div>
   );
@@ -145,6 +148,7 @@ function GuildAdmin({ onLogout }: { onLogout: () => void }) {
 function CreateGuildForm({ onCreated }: { onCreated: (guilds: AdminGuild[]) => void }) {
   const [name, setName] = useState("");
   const [inviteCode, setInviteCode] = useState(randomCode);
+  const [viewerCode, setViewerCode] = useState(randomCode);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -153,10 +157,11 @@ function CreateGuildForm({ onCreated }: { onCreated: (guilds: AdminGuild[]) => v
     setSaving(true);
     setError(null);
     try {
-      const { guilds } = await api.adminCreateGuild({ name, inviteCode });
+      const { guilds } = await api.adminCreateGuild({ name, inviteCode, viewerCode });
       onCreated(guilds);
       setName("");
       setInviteCode(randomCode());
+      setViewerCode(randomCode());
     } catch (err) {
       setError(errorText(err, "Couldn't create the guild"));
     } finally {
@@ -167,7 +172,7 @@ function CreateGuildForm({ onCreated }: { onCreated: (guilds: AdminGuild[]) => v
   return (
     <form onSubmit={handleSubmit} className="mb-6 rounded-2xl border border-border bg-panel p-5">
       <h2 className="mb-4 text-base font-semibold text-heading">New guild</h2>
-      <div className="grid gap-4 md:grid-cols-[2fr_2fr_auto] md:items-end">
+      <div className="grid gap-4 md:grid-cols-[2fr_2fr_2fr_auto] md:items-end">
         <Field label="Name">
           <input value={name} onChange={(e) => setName(e.target.value)} required maxLength={60} className={inputClass} />
         </Field>
@@ -175,6 +180,14 @@ function CreateGuildForm({ onCreated }: { onCreated: (guilds: AdminGuild[]) => v
           <div className="flex gap-2">
             <input value={inviteCode} onChange={(e) => setInviteCode(e.target.value)} required minLength={6} className={inputClass} />
             <button type="button" onClick={() => setInviteCode(randomCode())} className={smallButton} title="Generate a new code">
+              ↻
+            </button>
+          </div>
+        </Field>
+        <Field label="Viewer code (optional)">
+          <div className="flex gap-2">
+            <input value={viewerCode} onChange={(e) => setViewerCode(e.target.value)} minLength={6} className={inputClass} />
+            <button type="button" onClick={() => setViewerCode(randomCode())} className={smallButton} title="Generate a new code">
               ↻
             </button>
           </div>
@@ -192,12 +205,14 @@ function GuildRow({ guild, onChange }: { guild: AdminGuild; onChange: (guilds: A
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(guild.name);
   const [inviteCode, setInviteCode] = useState(guild.inviteCode);
+  const [viewerCode, setViewerCode] = useState(guild.viewerCode ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function startEdit() {
     setName(guild.name);
     setInviteCode(guild.inviteCode);
+    setViewerCode(guild.viewerCode ?? "");
     setError(null);
     setEditing(true);
   }
@@ -206,7 +221,7 @@ function GuildRow({ guild, onChange }: { guild: AdminGuild; onChange: (guilds: A
     setBusy(true);
     setError(null);
     try {
-      const { guilds } = await api.adminUpdateGuild(guild.id, { name, inviteCode });
+      const { guilds } = await api.adminUpdateGuild(guild.id, { name, inviteCode, viewerCode });
       onChange(guilds);
       setEditing(false);
     } catch (err) {
@@ -241,6 +256,23 @@ function GuildRow({ guild, onChange }: { guild: AdminGuild; onChange: (guilds: A
             guild.inviteCode
           )}
         </td>
+        <td className="p-3 font-mono text-ink">
+          {editing ? (
+            <div className="flex gap-2">
+              <input
+                value={viewerCode}
+                onChange={(e) => setViewerCode(e.target.value)}
+                placeholder="none"
+                className={cellInput}
+              />
+              <button type="button" onClick={() => setViewerCode(randomCode())} className={smallButton} title="Generate a new code">
+                ↻
+              </button>
+            </div>
+          ) : (
+            guild.viewerCode ?? <span className="text-ink-dim">none</span>
+          )}
+        </td>
         <td className="p-3 font-mono text-ink-dim">
           {guild.discordGuildId ? `on · ${guild.discordGuildId}` : "off"}
         </td>
@@ -272,7 +304,7 @@ function GuildRow({ guild, onChange }: { guild: AdminGuild; onChange: (guilds: A
       </tr>
       {error && (
         <tr>
-          <td colSpan={6} className="px-3 pb-3 text-sm text-danger">
+          <td colSpan={7} className="px-3 pb-3 text-sm text-danger">
             {error}
           </td>
         </tr>

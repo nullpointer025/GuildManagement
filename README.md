@@ -5,8 +5,8 @@ A small web app for running game guilds — any number of them on one site: impo
 - **Roster** — drag & drop (or browse) a CSV export to import members. Re-importing later updates existing members by IGN, adds new ones, and flags anyone missing from the latest export instead of deleting them.
 - **Discord check** — each roster row has an "In Discord" checkbox. Officers can tick it by hand. Discord sync is optional and off by default: turning it on under **Guild settings** (the ⚙ next to the guild name) asks for the guild's Discord server ID and adds a **Sync with Discord** button that sets the box for everyone by matching IGNs against server nicknames (also needs the site's `DISCORD_BOT_TOKEN` and the bot invited to the guild's server). It also re-syncs automatically after every CSV import. A sync overwrites manual ticks. An "Ultimate" checkbox sits next to it, set by hand only; neither a CSV import nor a sync changes it.
 - **Raid Teams** — create named, saved raids (e.g. "Saturday WoE"), each with two independent boards, **Main** and **Sub**, sized separately and sharing one roster pool (a player assigned on one board is unavailable on the other). Drag roster cards into party slots; dragging onto an occupied slot swaps the two players, dragging back onto the roster pool benches a player. Everything is saved to the server as you go and polled live every few seconds, so officers editing the same raid at the same time see each other's changes without refreshing.
-- **Guilds & access** — no individual accounts. Each guild has its own invite code, and the code decides which guild you're in: every guild's roster, raids, perma parties and league history are separate. Officers enter their guild's code once; it's remembered for 30 days.
-- **Admin** — `/admin`, unlocked with `ADMIN_CODE`, lists every guild and lets you create guilds, rename them, change invite codes (which signs that guild's officers out) and delete a guild with all of its data.
+- **Guilds & access** — no individual accounts. Each guild has its own invite code, and the code decides which guild you're in: every guild's roster, raids, perma parties and league history are separate. Officers enter their guild's code once; it's remembered for 30 days. A guild can also have an optional **viewer code** for members: it shows the roster, raid parties and guild league history read-only — no CSV/battle record uploads, no available-players pool, no editing, and no actions, perma parties, notes, clear or delete.
+- **Admin** — `/admin`, unlocked with `ADMIN_CODE`, lists every guild and lets you create guilds, rename them, change invite and viewer codes (which signs out whoever used the old code) and delete a guild with all of its data.
 
 ## Stack
 
@@ -27,7 +27,7 @@ Copy `server/.env.example` to `server/.env` and fill in:
 - `ADMIN_CODE` — unlocks the `/admin` page where guilds and their invite codes are created
 - `DATABASE_URL` — Supabase → **Connect** → *Transaction pooler* connection string (port 6543), with your database password filled in
 
-Create the tables once by running each file in `supabase/migrations/` in order (`20261025000000_init.sql`, then `20261114000000_multi_guild.sql`) in the Supabase SQL editor.
+Create the tables once by running each file in `supabase/migrations/` in order (`20261025000000_init.sql`, then `20261114000000_multi_guild.sql`, and so on) in the Supabase SQL editor.
 
 Then, in two terminals:
 

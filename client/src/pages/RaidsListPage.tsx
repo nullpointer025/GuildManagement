@@ -4,6 +4,7 @@ import { api, ApiError } from "../api/client";
 import type { RaidSummary, RaidType } from "../types";
 import { buttonClass, inputClass } from "../components/FormKit";
 import { RAID_TYPE_BOARDS, RAID_TYPE_LABELS } from "../lib/raidTypes";
+import { useIsOfficer } from "../store/auth";
 
 export function RaidsListPage() {
   const [raids, setRaids] = useState<RaidSummary[]>([]);
@@ -15,6 +16,7 @@ export function RaidsListPage() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const isOfficer = useIsOfficer();
 
   async function load() {
     setLoading(true);
@@ -60,10 +62,13 @@ export function RaidsListPage() {
       <div>
         <h1 className="text-3xl font-bold text-heading">Raid Teams</h1>
         <p className="mt-1.5 text-base text-ink-dim">
-          Build and save drag-and-drop party compositions for your raids.
+          {isOfficer
+            ? "Build and save drag-and-drop party compositions for your raids."
+            : "See the party compositions for your raids."}
         </p>
       </div>
 
+      {isOfficer && (
       <form
         onSubmit={handleCreate}
         className="flex flex-wrap items-end gap-4 rounded-2xl border border-border bg-panel p-6"
@@ -130,13 +135,14 @@ export function RaidsListPage() {
           {creating ? "Creating…" : "Create raid"}
         </button>
       </form>
+      )}
       {error && <p className="text-base text-danger">{error}</p>}
 
       {loading && <p className="text-base text-ink-dim">Loading raids…</p>}
 
       {!loading && raids.length === 0 && (
         <p className="rounded-2xl border border-dashed border-border p-10 text-center text-base text-ink-dim">
-          No raid teams yet. Create one above to start assigning players.
+          No raid teams yet.{isOfficer && " Create one above to start assigning players."}
         </p>
       )}
 
@@ -161,6 +167,7 @@ export function RaidsListPage() {
                 Updated {new Date(raid.updated_at).toLocaleString()}
               </p>
             </button>
+            {isOfficer && (
             <button
               onClick={() => handleDelete(raid.id)}
               className="absolute right-4 top-4 hidden h-7 w-7 items-center justify-center rounded-full border border-border text-sm text-ink-dim hover:border-danger hover:text-danger group-hover:flex"
@@ -168,6 +175,7 @@ export function RaidsListPage() {
             >
               ×
             </button>
+            )}
           </div>
         ))}
       </div>

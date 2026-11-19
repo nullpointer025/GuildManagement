@@ -11,10 +11,13 @@ export const COOKIE_NAME = "guild_access";
 export const ADMIN_COOKIE_NAME = "guild_admin";
 
 // There are no individual accounts: whoever knows a guild's invite code gets that
-// guild. The token names the guild and the guild's session_version, which goes up
-// whenever its invite code changes, so changing a code signs everyone out of it.
-export function signAccessToken(guild) {
-  return jwt.sign({ guildId: guild.id, v: guild.session_version }, JWT_SECRET, { expiresIn: "30d" });
+// guild as an officer; whoever knows its viewer code gets it read-only. The token
+// names the guild, the role and that role's session version, which goes up whenever
+// the role's code changes, so changing a code signs everyone using it out.
+// Tokens from before roles existed have no role and are officer tokens.
+export function signAccessToken(guild, role = "officer") {
+  const v = role === "viewer" ? guild.viewer_session_version : guild.session_version;
+  return jwt.sign({ guildId: guild.id, role, v }, JWT_SECRET, { expiresIn: "30d" });
 }
 
 export async function requireAccess(req, res, next) {
@@ -29,18 +32,34 @@ export async function requireAccess(req, res, next) {
   }
   const guild = Number.isInteger(payload?.guildId)
     ? await db.get(
-        "SELECT id, name, discord_sync_enabled, discord_guild_id, session_version FROM guilds WHERE id = ?",
+        `SELECT id, name, discord_sync_enabled, discord_guild_id, session_version, viewer_session_version
+         FROM guilds WHERE id = ?`,
         payload.guildId
       )
     : null;
-  if (!guild || guild.session_version !== payload.v) {
+  const role = payload?.role === "viewer" ? "viewer" : "officer";
+  const version = role === "viewer" ? guild?.viewer_session_version : guild?.session_version;
+  if (!guild || version !== payload.v) {
     res.clearCookie(COOKIE_NAME, { path: "/" });
     return res.status(401).json({ error: "Session expired, please enter the invite code again" });
   }
 
   // Every guild-owned query in the routes filters by req.guild.id.
   req.guild = guild;
+  req.role = role;
   next();
+}
+
+// For routes only officers may use at all.
+export function requireOfficer(req, res, next) {
+  if (req.role !== "officer") return res.status(403).json({ error: "View-only access can't do that" });
+  next();
+}
+
+// Viewers may read (GET) but not change anything.
+export function officerWrites(req, res, next) {
+  if (req.method === "GET" || req.method === "HEAD") return next();
+  return requireOfficer(req, res, next);
 }
 
 // The admin page is unlocked with ADMIN_CODE. The signing key mixes in a hash of

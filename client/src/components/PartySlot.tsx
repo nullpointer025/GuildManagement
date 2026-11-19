@@ -1,6 +1,7 @@
 import { useDroppable } from "@dnd-kit/core";
 import type { Player } from "../types";
 import { DraggablePlayer } from "./DraggablePlayer";
+import { PlayerCard } from "./PlayerCard";
 
 interface PartySlotProps {
   partyIndex: number;
@@ -8,12 +9,14 @@ interface PartySlotProps {
   player: Player | null;
   onRemove: () => void;
   onOpenPicker: () => void;
+  readOnly?: boolean;
 }
 
-export function PartySlot({ partyIndex, slotIndex, player, onRemove, onOpenPicker }: PartySlotProps) {
+export function PartySlot({ partyIndex, slotIndex, player, onRemove, onOpenPicker, readOnly = false }: PartySlotProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: `slot-${partyIndex}-${slotIndex}`,
     data: { type: "slot", partyIndex, slotIndex },
+    disabled: readOnly,
   });
 
   return (
@@ -24,7 +27,13 @@ export function PartySlot({ partyIndex, slotIndex, player, onRemove, onOpenPicke
         isOver ? "border-gold bg-gold/10" : "border-border-soft",
       ].join(" ")}
     >
-      {player ? (
+      {player && readOnly ? (
+        <PlayerCard player={player} />
+      ) : !player && readOnly ? (
+        <div className="flex h-[66px] w-full items-center justify-center rounded-lg text-sm text-ink-dim/60">
+          Slot {slotIndex + 1}
+        </div>
+      ) : player ? (
         <DraggablePlayer
           player={player}
           from={{ type: "slot", partyIndex, slotIndex }}

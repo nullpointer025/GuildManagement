@@ -1,13 +1,15 @@
 import { Router } from "express";
 import multer from "multer";
 import { db, transaction } from "../db.js";
-import { requireAccess } from "../auth.js";
+import { requireAccess, officerWrites } from "../auth.js";
 import { parsePlayersCsv } from "../csvImport.js";
 import { linkPendingLeagueStats, renamePlayersFromLeagueNames } from "../leagueRoster.js";
 import { DiscordError, createDiscordMatcher, discordConfigured, fetchGuildMembers } from "../discord.js";
 
 export const playersRouter = Router();
 playersRouter.use(requireAccess);
+// Viewers can look but not change anything.
+playersRouter.use(officerWrites);
 
 // Vercel rejects request bodies over 4.5 MB, so stay under that.
 const upload = multer({ limits: { fileSize: 4 * 1024 * 1024 } });

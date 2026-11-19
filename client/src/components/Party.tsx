@@ -9,9 +9,11 @@ interface PartyProps {
   onRemove: (slotIndex: number) => void;
   onRename: (name: string) => void;
   onOpenPicker: (slotIndex: number) => void;
+  // View-only: no renaming, dragging, removing or picking players.
+  readOnly?: boolean;
 }
 
-export function Party({ partyIndex, name, members, onRemove, onRename, onOpenPicker }: PartyProps) {
+export function Party({ partyIndex, name, members, onRemove, onRename, onOpenPicker, readOnly = false }: PartyProps) {
   const [draft, setDraft] = useState(name ?? "");
 
   useEffect(() => {
@@ -40,6 +42,9 @@ export function Party({ partyIndex, name, members, onRemove, onRename, onOpenPic
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="shrink-0 text-base font-semibold text-heading">{partyIndex + 1}</span>
           <span className="shrink-0 text-base text-ink-dim">—</span>
+          {readOnly ? (
+            <span className="min-w-0 flex-1 truncate px-1 text-base font-semibold text-heading">{name}</span>
+          ) : (
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -48,6 +53,7 @@ export function Party({ partyIndex, name, members, onRemove, onRename, onOpenPic
             placeholder="Name this party…"
             className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1 text-base font-semibold text-heading outline-none placeholder:font-normal placeholder:text-ink-dim/50 hover:border-border focus:border-gold focus:bg-panel-alt"
           />
+          )}
         </div>
         <span className="shrink-0 text-sm text-ink-dim">
           {filled}/{members.length}
@@ -63,6 +69,7 @@ export function Party({ partyIndex, name, members, onRemove, onRename, onOpenPic
             player={m}
             onRemove={() => onRemove(slotIndex)}
             onOpenPicker={() => onOpenPicker(slotIndex)}
+            readOnly={readOnly}
           />
         ))}
       </div>

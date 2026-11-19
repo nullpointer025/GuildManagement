@@ -22,6 +22,7 @@ import { PermaPartiesModal } from "../components/PermaPartiesModal";
 import { ClassCounter } from "../components/ClassCounter";
 import { ActionsModal, type RaidAction } from "../components/ActionsModal";
 import { RAID_TYPE_BOARDS, boardLabel } from "../lib/raidTypes";
+import { useIsOfficer } from "../store/auth";
 
 type SortKey = "gear_score" | "level" | "ign" | "class";
 
@@ -48,6 +49,8 @@ export function RaidBuilderPage() {
   const { id } = useParams();
   const raidId = Number(id);
   const navigate = useNavigate();
+  // Viewers see the parties only: no pool, no editing, no actions/perma parties/notes.
+  const isOfficer = useIsOfficer();
 
   const [raid, setRaid] = useState<RaidDetail | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -105,8 +108,8 @@ export function RaidBuilderPage() {
   }
 
   useEffect(() => {
-    loadPermaMembers();
-  }, []);
+    if (isOfficer) loadPermaMembers();
+  }, [isOfficer]);
 
   useEffect(() => {
     setAutoAssignNotice(null);
@@ -412,6 +415,7 @@ export function RaidBuilderPage() {
             >
               ← Back to raid teams
             </button>
+            {isOfficer ? (
             <input
               id="raid-name-input"
               value={nameDraft}
@@ -420,6 +424,9 @@ export function RaidBuilderPage() {
               onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
               className="w-full max-w-lg rounded-lg border border-transparent bg-transparent px-1.5 text-3xl font-bold text-heading outline-none hover:border-border focus:border-gold focus:bg-panel-alt"
             />
+            ) : (
+              <h1 className="px-1.5 text-3xl font-bold text-heading">{raid.name}</h1>
+            )}
             <p className="mt-1.5 px-1.5 text-base text-ink-dim">
               {totalAssigned}/{totalSlots} players assigned ·{" "}
               <span className={activeBoard === raidBoards[0].key ? "text-gold" : "text-ink-dim"}>
@@ -445,6 +452,7 @@ export function RaidBuilderPage() {
                 </button>
               ))}
             </div>
+            {isOfficer && (
             <div className="flex items-center gap-1 rounded-lg border border-border p-1">
               <button
                 onClick={() => handlePartyCountChange(-1)}
@@ -462,6 +470,7 @@ export function RaidBuilderPage() {
                 +
               </button>
             </div>
+            )}
             <div className="flex items-center gap-1 rounded-lg border border-border p-1">
               <span className="pl-2 text-sm text-ink-dim">Export parties</span>
               <input
@@ -492,6 +501,8 @@ export function RaidBuilderPage() {
                 className="w-14 rounded-md border border-transparent bg-panel-alt px-2 py-1 text-center text-sm text-ink outline-none focus:border-gold"
               />
             </div>
+            {isOfficer && (
+            <>
             <button
               onClick={() => setActionsOpen(true)}
               className="rounded-lg border border-border px-4 py-2 text-base text-ink-dim hover:border-gold hover:text-gold"
@@ -517,6 +528,8 @@ export function RaidBuilderPage() {
                 />
               )}
             </button>
+            </>
+            )}
             <button
               onClick={handleExportImage}
               disabled={exporting}
@@ -524,6 +537,8 @@ export function RaidBuilderPage() {
             >
               {exporting ? "Exporting…" : "Export as image"}
             </button>
+            {isOfficer && (
+            <>
             <button
               onClick={handleClearBoard}
               disabled={totalAssigned === 0 && board.partyNames.every((n) => !n)}
@@ -537,6 +552,8 @@ export function RaidBuilderPage() {
             >
               Delete raid
             </button>
+            </>
+            )}
           </div>
         </div>
 
@@ -547,7 +564,8 @@ export function RaidBuilderPage() {
           <ClassCounter parties={board.parties} />
         </div>
 
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[320px_1fr]">
+        <div className={isOfficer ? "grid grid-cols-1 gap-8 lg:grid-cols-[320px_1fr]" : "grid grid-cols-1 gap-8"}>
+          {isOfficer && (
           <div className="flex flex-col gap-3 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:self-start">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-dim">
               Available players ({pool.length})
@@ -584,6 +602,7 @@ export function RaidBuilderPage() {
               <PoolPanel players={pool} />
             </div>
           </div>
+          )}
 
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {board.parties.map((members, partyIndex) => (
@@ -595,6 +614,7 @@ export function RaidBuilderPage() {
                 onRemove={(slotIndex) => setSlot(partyIndex, slotIndex, null)}
                 onRename={(name) => handleRenameParty(partyIndex, name)}
                 onOpenPicker={(slotIndex) => setPickerTarget({ partyIndex, slotIndex })}
+                readOnly={!isOfficer}
               />
             ))}
           </div>

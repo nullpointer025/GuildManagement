@@ -1,4 +1,5 @@
 import type {
+  AccessRole,
   AdminGuild,
   ApplyPermaPartiesResult,
   AutoAssignPartiesResult,
@@ -57,7 +58,7 @@ export const api = {
   enter: (code: string) =>
     request<{ ok: true }>("/auth/enter", { method: "POST", body: JSON.stringify({ code }) }),
   logout: () => request<{ ok: true }>("/auth/logout", { method: "POST" }),
-  me: () => request<{ unlocked: true; guild: Guild }>("/auth/me"),
+  me: () => request<{ unlocked: true; guild: Guild; role: AccessRole }>("/auth/me"),
   updateGuildSettings: (payload: { discordSyncEnabled: boolean; discordGuildId: string }) =>
     request<{ guild: Guild }>("/auth/guild", { method: "PATCH", body: JSON.stringify(payload) }),
 
@@ -66,9 +67,9 @@ export const api = {
   adminLogout: () => request<{ ok: true }>("/admin/logout", { method: "POST" }),
   adminMe: () => request<{ admin: true }>("/admin/me"),
   adminGuilds: () => request<{ guilds: AdminGuild[] }>("/admin/guilds"),
-  adminCreateGuild: (payload: { name: string; inviteCode: string }) =>
+  adminCreateGuild: (payload: { name: string; inviteCode: string; viewerCode?: string }) =>
     request<{ guilds: AdminGuild[] }>("/admin/guilds", { method: "POST", body: JSON.stringify(payload) }),
-  adminUpdateGuild: (id: number, payload: { name?: string; inviteCode?: string }) =>
+  adminUpdateGuild: (id: number, payload: { name?: string; inviteCode?: string; viewerCode?: string }) =>
     request<{ guilds: AdminGuild[] }>(`/admin/guilds/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   adminDeleteGuild: (id: number) => request<{ guilds: AdminGuild[] }>(`/admin/guilds/${id}`, { method: "DELETE" }),
 

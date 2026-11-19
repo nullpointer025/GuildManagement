@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api/client";
 import type { DiscordSyncSummary, ImportSummary, Player, PlayerFlag } from "../types";
 import { CsvDropzone } from "../components/CsvDropzone";
-import { useAuthStore } from "../store/auth";
+import { useAuthStore, useIsOfficer } from "../store/auth";
 
 type SortKey = "gear_score" | "level" | "ign" | "total_contribution";
 
@@ -25,6 +25,7 @@ export function RosterPage() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const discordReady = useAuthStore((s) => s.guild?.discordReady ?? false);
   const discordSyncEnabled = useAuthStore((s) => s.guild?.discordSyncEnabled ?? false);
+  const isOfficer = useIsOfficer();
 
   async function loadPlayers() {
     setLoading(true);
@@ -151,6 +152,7 @@ export function RosterPage() {
         </p>
       </div>
 
+      {isOfficer && (
       <div className="rounded-2xl border border-border bg-panel p-6">
         <CsvDropzone onFiles={(files) => handleFile(files[0])} busy={importing} />
         {importError && <p className="mt-4 text-base text-danger">{importError}</p>}
@@ -178,6 +180,7 @@ export function RosterPage() {
           </p>
         )}
       </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-4">
         <input
@@ -214,7 +217,7 @@ export function RosterPage() {
           />
           Only not in Discord
         </label>
-        {discordSyncEnabled && (
+        {isOfficer && discordSyncEnabled && (
           <button
             type="button"
             onClick={handleDiscordSync}
@@ -290,7 +293,7 @@ export function RosterPage() {
             {!loading && filtered.length === 0 && (
               <tr>
                 <td colSpan={10} className="px-5 py-10 text-center text-ink-dim">
-                  No members found. Import a CSV export to get started.
+                  No members found.{isOfficer && " Import a CSV export to get started."}
                 </td>
               </tr>
             )}
@@ -329,6 +332,7 @@ export function RosterPage() {
                     type="checkbox"
                     checked={p.in_discord === 1}
                     onChange={() => toggleFlag(p, "in_discord")}
+                    disabled={!isOfficer}
                     aria-label={`${p.ign} is in Discord`}
                     className="h-4 w-4 accent-[#d9a441]"
                   />
@@ -338,6 +342,7 @@ export function RosterPage() {
                     type="checkbox"
                     checked={p.ultimate === 1}
                     onChange={() => toggleFlag(p, "ultimate")}
+                    disabled={!isOfficer}
                     aria-label={`${p.ign} has Ultimate`}
                     className="h-4 w-4 accent-[#d9a441]"
                   />

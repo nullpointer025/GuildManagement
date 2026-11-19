@@ -227,10 +227,15 @@ export interface Guild {
 }
 
 // A guild as the site admin page lists it.
+// Officers entered the guild's invite code; viewers its view-only viewer code.
+export type AccessRole = "officer" | "viewer";
+
 export interface AdminGuild {
   id: number;
   name: string;
   inviteCode: string;
+  // Optional code for view-only access; null when the guild has none.
+  viewerCode: string | null;
   // Set only while the guild has Discord sync turned on.
   discordGuildId: string | null;
   createdAt: string;

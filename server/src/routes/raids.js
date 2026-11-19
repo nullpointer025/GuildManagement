@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { db, transaction } from "../db.js";
-import { requireAccess } from "../auth.js";
+import { requireAccess, officerWrites } from "../auth.js";
 
 export const raidsRouter = Router();
 raidsRouter.use(requireAccess);
+// Viewers can look but not change anything.
+raidsRouter.use(officerWrites);
 
 // A raid's type fixes which boards it has. Every board shares one roster pool.
 const RAID_TYPE_BOARDS = {
@@ -190,6 +192,11 @@ raidsRouter.post("/", async (req, res) => {
 raidsRouter.get("/:id", async (req, res) => {
   const raid = await getRaidWithSlots(req.guild.id, Number(req.params.id));
   if (!raid) return res.status(404).json({ error: "Raid not found" });
+  // Raid notes are for officers only.
+  if (req.role === "viewer") {
+    raid.notes = null;
+    raid.notes_updated_at = null;
+  }
   res.json({ raid });
 });
 

@@ -14,6 +14,7 @@ import type {
 import { AddLeagueModal } from "../components/AddLeagueModal";
 import { formatCount, formatDate, formatStat } from "../lib/format";
 import { LEAGUE_STATS } from "../lib/battleRecord";
+import { useIsOfficer } from "../store/auth";
 
 type Tab = "tracker" | "leagues";
 type TrackerSort = "attendance" | "played" | "ign" | "lastAttended" | LeagueStatKey;
@@ -211,6 +212,8 @@ export function GuildLeaguePage() {
   const [expandedPlayer, setExpandedPlayer] = useState<number | null>(null);
   const [expandedLeague, setExpandedLeague] = useState<LeagueDetail | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  // Viewers can browse the tracker and history but not upload or delete records.
+  const isOfficer = useIsOfficer();
 
   async function load() {
     setLoading(true);
@@ -304,6 +307,7 @@ export function GuildLeaguePage() {
             )}
           </p>
         </div>
+        {isOfficer && (
         <button
           type="button"
           onClick={() => setAdding(true)}
@@ -311,6 +315,7 @@ export function GuildLeaguePage() {
         >
           + Upload battle record
         </button>
+        )}
       </div>
 
       <div className="flex items-center gap-1 self-start rounded-lg border border-border p-1">
@@ -412,7 +417,11 @@ export function GuildLeaguePage() {
                 {trackerRows.length === 0 && (
                   <tr>
                     <td colSpan={trackerCols} className="px-5 py-10 text-center text-ink-dim">
-                      {leagueCount === 0 ? "No leagues yet — upload a battle record to start tracking." : "No matching players."}
+                      {leagueCount === 0
+                        ? isOfficer
+                          ? "No leagues yet — upload a battle record to start tracking."
+                          : "No leagues yet."
+                        : "No matching players."}
                     </td>
                   </tr>
                 )}
@@ -492,7 +501,7 @@ export function GuildLeaguePage() {
               {leagues.length === 0 && (
                 <tr>
                   <td colSpan={8} className="px-5 py-10 text-center text-ink-dim">
-                    No leagues yet — upload a battle record to start tracking.
+                    {isOfficer ? "No leagues yet — upload a battle record to start tracking." : "No leagues yet."}
                   </td>
                 </tr>
               )}
@@ -526,7 +535,7 @@ export function GuildLeaguePage() {
                         )}
                       </td>
                       <td className={`${td} text-right`} onClick={(e) => e.stopPropagation()}>
-                        {confirmDeleteId === l.id ? (
+                        {!isOfficer ? null : confirmDeleteId === l.id ? (
                           <button
                             type="button"
                             autoFocus
@@ -599,7 +608,7 @@ export function GuildLeaguePage() {
         </div>
       )}
 
-      {adding && (
+      {isOfficer && adding && (
         <AddLeagueModal
           players={players}
           onClose={() => setAdding(false)}
